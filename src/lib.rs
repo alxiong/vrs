@@ -17,6 +17,7 @@ use matrix::Matrix;
 use thiserror::Error;
 
 pub mod advz;
+pub mod bivariate;
 pub mod matrix;
 #[cfg(test)]
 pub mod test_utils;
