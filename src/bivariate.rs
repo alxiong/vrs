@@ -1,10 +1,11 @@
 //! Bivariate polynomial compatible with arkwork's trait and backend
 
 use ark_ff::{Field, Zero};
-use ark_poly::Polynomial;
+use ark_poly::{DenseUVPolynomial, Polynomial};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::{
     fmt,
+    iter::successors,
     ops::{Add, AddAssign, Neg, Sub, SubAssign},
     rand::Rng,
 };
@@ -106,6 +107,54 @@ impl<F: Field> DensePolynomial<F> {
             deg_x,
             deg_y,
         }
+    }
+
+    /// Partial-evaluate f(X, Y) at concrete x, returns univariate poly G(Y) = f(x, Y)
+    pub fn partial_evaluate_x(&self, x: &F) -> ark_poly::univariate::DensePolynomial<F> {
+        // first compute v = (1, x, x^2, ... , x^d_x),
+        let x_pows: Vec<F> = successors(Some(F::ONE), |&prev| Some(prev * x))
+            .take(self.deg_x + 1)
+            .collect();
+
+        // then dot product with each column of coefficient
+        let coeffs = self
+            .coeffs
+            .par_iter()
+            .enumerate()
+            .map(|(row_idx, row)| {
+                let x_pow = x_pows[row_idx];
+                row.par_iter().map(|c| x_pow * c).collect::<Vec<F>>()
+            })
+            .reduce_with(|mut acc, powed_row| {
+                acc.par_iter_mut()
+                    .zip(powed_row.par_iter())
+                    .for_each(|(acc, &val)| *acc += val);
+                acc
+            })
+            .unwrap_or_else(|| vec![F::ZERO; self.deg_y + 1]);
+
+        ark_poly::univariate::DensePolynomial::from_coefficients_vec(coeffs)
+    }
+
+    /// Partial-evaluate f(X, Y) at concrete y, returns univariate poly G(X) = f(X, y)
+    pub fn partial_evaluate_y(&self, y: &F) -> ark_poly::univariate::DensePolynomial<F> {
+        // first compute v = (1, y, y^2, ..., y^d_y),
+        let y_pows: Vec<F> = successors(Some(F::ONE), |&prev| Some(prev * y))
+            .take(self.deg_y + 1)
+            .collect();
+
+        // then dot product with each row of coefficient
+        let coeffs: Vec<F> = self
+            .coeffs
+            .par_iter()
+            .map(|row| {
+                row.par_iter()
+                    .zip(y_pows.par_iter())
+                    .map(|(c, y_pow)| *c * y_pow)
+                    .sum::<F>()
+            })
+            .collect();
+        ark_poly::univariate::DensePolynomial::from_coefficients_vec(coeffs)
     }
 
     // adjust/decrease degree in case there are leading zeros in X or Y
@@ -565,6 +614,23 @@ mod tests {
                 }
             }
             assert_eq!(p1.evaluate(&point), expected);
+        }
+    }
+
+    #[test]
+    fn partial_eval() {
+        let rng = &mut test_rng();
+        for _ in 0..100 {
+            let dx = rng.gen_range(0..20) as usize;
+            let dy = rng.gen_range(0..20) as usize;
+            let x = Fr::rand(rng);
+            let y = Fr::rand(rng);
+
+            let p = DensePolynomial::<Fr>::rand(dx, dy, rng);
+            let g_y = p.partial_evaluate_x(&x);
+            let g_x = p.partial_evaluate_y(&y);
+            assert_eq!(g_y.evaluate(&y), p.evaluate(&[x, y]));
+            assert_eq!(g_x.evaluate(&x), p.evaluate(&[x, y]));
         }
     }
 }
