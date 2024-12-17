@@ -7,5 +7,5 @@ benchmark:
     @echo "Done!"
 
 # Run a test named "tmp"
-test-tmp:
+tmp:
     cargo test tmp -- --nocapture

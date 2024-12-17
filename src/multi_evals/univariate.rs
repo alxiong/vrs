@@ -25,6 +25,11 @@ pub fn multi_eval<E: Pairing>(
     poly: &DensePolynomial<E::ScalarField>,
     domain: &Radix2EvaluationDomain<E::ScalarField>,
 ) -> Vec<UnivariateKzgProof<E>> {
+    assert!(
+        domain.size >= poly.degree() as u64 * 2,
+        "domain_size < degree * 2, consider double the domain_size then truncate the result"
+    );
+    // TODO: improve memory footprint
     let c = poly.coeffs.clone().into_iter().rev().collect::<Vec<_>>();
     // NOTE: arkwork's EC-NNT only works over Projective
     let t = pk.powers_of_g[..=poly.degree()]
@@ -53,4 +58,48 @@ pub fn multi_eval<E: Pairing>(
         })
         .collect();
     proofs
+}
+
+#[cfg(test)]
+mod tests {
+    use ark_bn254::{Bn254, Fr};
+    use ark_poly::{
+        univariate::DensePolynomial, DenseUVPolynomial, EvaluationDomain, Radix2EvaluationDomain,
+    };
+    use ark_std::rand::Rng;
+    use jf_pcs::prelude::*;
+    use p3_maybe_rayon::prelude::*;
+
+    use crate::test_utils::test_rng;
+
+    #[test]
+    fn test_uv_multi_eval() {
+        let rng = &mut test_rng();
+        let max_degree = 32;
+        let pp = UnivariateUniversalParams::<Bn254>::gen_srs_for_testing(rng, max_degree).unwrap();
+
+        for _ in 0..10 {
+            let degree = rng.gen_range(4..max_degree);
+
+            let (pk, vk) = UnivariateUniversalParams::trim(&pp, degree).unwrap();
+            let domain =
+                Radix2EvaluationDomain::new(rng.gen_range(2 * degree..8 * degree)).unwrap();
+            let poly = DensePolynomial::<Fr>::rand(degree, rng);
+            let cm = UnivariateKzgPCS::commit(&pk, &poly).unwrap();
+
+            let proofs = super::multi_eval(&pk, &poly, &domain);
+            let elements = domain.elements().collect::<Vec<_>>();
+            eprintln!("Degree: {}, DomainSize: {}", degree, domain.size);
+            proofs
+                .par_iter()
+                .zip(elements.par_iter())
+                .for_each(|(proof, point)| {
+                    // test match the single-eval/open proof
+                    let (expected_proof, eval) = UnivariateKzgPCS::open(&pk, &poly, point).unwrap();
+                    assert_eq!(&expected_proof, proof);
+                    // should pass verification
+                    assert!(UnivariateKzgPCS::verify(&vk, &cm, point, &eval, proof).unwrap());
+                });
+        }
+    }
 }
