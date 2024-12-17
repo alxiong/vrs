@@ -7,7 +7,9 @@
 //! - Appendix A.2 in https://eprint.iacr.org/2024/1189
 //! - Algorithm 1 in https://eprint.iacr.org/2021/1500
 
-use crate::{matrix::Matrix, VerifiableReedSolomon, VrsError, VrsShare};
+use crate::{
+    matrix::Matrix, multi_evals::univariate::multi_eval, VerifiableReedSolomon, VrsError, VrsShare,
+};
 use anyhow::anyhow;
 use ark_crypto_primitives::{
     crh,
@@ -152,16 +154,12 @@ where
         let cm = (mt.root(), row_poly_cms);
 
         // 5. run multi-evaluation on the aggregated poly
-        // most naive: just run single evaluation on all points
         let multi_eval_time = start_timer!(|| "multi-eval on agg_poly");
-        let elements: Vec<_> = pk.domain.elements().collect();
-        let shares = elements
-            .par_iter()
+        let eval_proofs = multi_eval(&pk.pcs_pk, &agg_poly, &pk.domain);
+        let shares = eval_proofs
+            .into_par_iter()
             .zip(encoded.par_col_enumerate())
-            .map(|(point, (col_idx, data))| {
-                // TODO: thread-safe error propogation is a hustle, panic for now
-                let (eval_proof, _eval) = UnivariateKzgPCS::open(&pk.pcs_pk, &agg_poly, point)
-                    .expect("failed to compute evaluation proof");
+            .map(|(eval_proof, (col_idx, data))| {
                 let mt_proof = mt
                     .generate_proof(col_idx)
                     .expect("fail to compute merkle proof");
