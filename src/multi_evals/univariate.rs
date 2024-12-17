@@ -8,7 +8,7 @@
 use ark_ec::{pairing::Pairing, AffineRepr, CurveGroup};
 use ark_poly::{univariate::DensePolynomial, EvaluationDomain, Polynomial, Radix2EvaluationDomain};
 use jf_pcs::prelude::{UnivariateKzgProof, UnivariateProverParam};
-use p3_maybe_rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use p3_maybe_rayon::prelude::*;
 
 /// Implement multi-evaluation for `jf_pcs::UnivariateKzgPCS`
 ///
@@ -29,35 +29,37 @@ pub fn multi_eval<E: Pairing>(
         domain.size >= poly.degree() as u64 * 2,
         "domain_size < degree * 2, consider double the domain_size then truncate the result"
     );
-    // TODO: improve memory footprint
-    let c = poly.coeffs.clone().into_iter().rev().collect::<Vec<_>>();
+    let mut c = poly.coeffs.clone().into_iter().rev().collect::<Vec<_>>();
     // NOTE: arkwork's EC-NNT only works over Projective
-    let t = pk.powers_of_g[..=poly.degree()]
+    let mut t = pk.powers_of_g[..=poly.degree()]
         .par_iter()
         .map(|affine| affine.into_group())
         .collect::<Vec<_>>();
 
-    let fft_c: Vec<E::ScalarField> = domain.fft(&c);
-    let fft_t: Vec<E::G1> = domain.fft(&t);
+    domain.fft_in_place(&mut c);
+    let fft_c = c; // no memory copy/clone, just renaming (ownership transfer) to a clearer name
+    domain.fft_in_place(&mut t);
+    let mut fft_t = t;
 
-    let prod: Vec<E::G1> = fft_c
-        .par_iter()
-        .zip(fft_t.par_iter())
-        .map(|(c, t)| *t * c)
-        .collect();
+    fft_t
+        .par_iter_mut()
+        .zip(fft_c.par_iter())
+        .for_each(|(t, c)| *t *= c);
+    let mut prod = fft_t; // no memcpy, only rename
 
-    let mut h = domain.ifft(&prod);
+    domain.ifft_in_place(&mut prod);
+    let mut h = prod; // no memcpy, only rename
     h.truncate(poly.degree());
     h.reverse();
 
-    let proofs = domain
-        .fft(&h)
-        .par_iter()
+    domain.fft_in_place(&mut h);
+    let proofs_proj = h; // no memcpy, only rename
+    proofs_proj
+        .into_par_iter()
         .map(|proof| UnivariateKzgProof {
             proof: proof.into_affine(),
         })
-        .collect();
-    proofs
+        .collect()
 }
 
 #[cfg(test)]
