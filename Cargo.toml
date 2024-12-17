@@ -17,7 +17,14 @@ jf-pcs = { git = "https://github.com/EspressoSystems/jellyfish", version = "0.1.
 p3-maybe-rayon = "0.2"
 thiserror = "2"
 
+[dev-dependencies]
+criterion = "0.5.1"
+
 [features]
 default = ["parallel"]
 parallel = ["ark-ec/parallel", "ark-ff/parallel", "ark-poly/parallel", "jf-pcs/parallel", "p3-maybe-rayon/parallel", "ark-crypto-primitives/parallel"]
 print-trace = ["ark-std/print-trace"]
+
+[[bench]]
+name = "multi_evals"
+harness = false

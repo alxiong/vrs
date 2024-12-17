@@ -9,3 +9,7 @@ Install [Rust](https://www.rust-lang.org/) and [`just` runner](https://just.syst
 ``` sh
 just benchmark
 ```
+
+## Benchmarks
+
+View all the benchmark codes in [`./benches`](./benches) and some early results in [`./BENCH.md`](./BENCH.md)
