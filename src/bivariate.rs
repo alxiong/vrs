@@ -225,6 +225,34 @@ impl<F: Field> DensePolynomial<F> {
         }
     }
 
+    /// f'(X, Y) = f(X, Y) - g(X), if `in_x=true`
+    /// f'(X, Y) = f(X, Y) - g(Y), if `in_x=false`
+    pub fn sub_assign_uv_poly(&mut self, uv_poly: &univariate::DensePolynomial<F>, in_x: bool) {
+        if uv_poly.is_zero() {
+        } else {
+            if in_x {
+                assert!(
+                    uv_poly.degree() <= self.deg_x,
+                    "only support subtracting smaller deg univariate for now"
+                );
+                self.coeffs
+                    .par_iter_mut()
+                    .zip(uv_poly.coeffs.par_iter())
+                    .for_each(|(row, sub_term)| row[0] -= *sub_term);
+                self.update_degree();
+            } else {
+                assert!(
+                    uv_poly.degree() <= self.deg_y,
+                    "only support subtracting smaller deg univariate for now"
+                );
+                self.coeffs[0]
+                    .par_iter_mut()
+                    .zip(uv_poly.coeffs.par_iter())
+                    .for_each(|(c, sub_term)| *c -= *sub_term);
+            }
+        }
+    }
+
     // adjust/decrease degree in case there are leading zeros in X or Y
     fn update_degree(&mut self) {
         // adjust deg_x
@@ -725,6 +753,35 @@ mod tests {
                 quotient.evaluate(&r) * divisor.evaluate(&r.0) + remainder.evaluate(&r),
                 p.evaluate(&r)
             );
+        }
+    }
+
+    #[test]
+    fn sub_assign_uv_polys() {
+        let rng = &mut test_rng();
+        for _ in 0..100 {
+            let dx = rng.gen_range(1..20) as usize;
+            let dy = rng.gen_range(1..20) as usize;
+            let uv_deg = rng.gen_range(0..dx) as usize;
+
+            let mut p = DensePolynomial::<Fr>::rand(dx, dy, rng);
+            let p_old = p.clone();
+            let q_x = ark_poly::univariate::DensePolynomial::rand(uv_deg, rng);
+            p.sub_assign_uv_poly(&q_x, true);
+
+            // we test p' = p-q via evaluations at random points
+            let r = (Fr::rand(rng), Fr::rand(rng));
+            assert_eq!(p.evaluate(&r), p_old.evaluate(&r) - q_x.evaluate(&r.0));
+            p.sub_assign_uv_poly(&-q_x, true);
+            assert_eq!(p, p_old);
+
+            let p_old = p.clone();
+            let uv_deg = rng.gen_range(0..dy) as usize;
+            let q_y = ark_poly::univariate::DensePolynomial::rand(uv_deg, rng);
+            p.sub_assign_uv_poly(&q_y, false);
+            assert_eq!(p.evaluate(&r), p_old.evaluate(&r) - q_y.evaluate(&r.1));
+            p.sub_assign_uv_poly(&-q_y, false);
+            assert_eq!(p, p_old);
         }
     }
 }
