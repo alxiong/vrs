@@ -18,6 +18,7 @@ use thiserror::Error;
 
 pub mod advz;
 pub mod bivariate;
+pub mod bkzg;
 pub mod matrix;
 pub mod multi_evals;
 #[cfg(test)]

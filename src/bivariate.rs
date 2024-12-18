@@ -203,17 +203,15 @@ impl<F: Field> DensePolynomial<F> {
                             .zip(cur_q_coeff.par_iter())
                             .for_each(|(c, q_c)| *c -= *q_c * div_coeff)
                     });
-                    while let Some(true) = remainder
-                        .coeffs
-                        .last()
-                        .map(|row| row.par_iter().all(|c| c.is_zero()))
-                    {
+                    if let Some(row) = remainder.coeffs.last() {
+                        assert!(row.par_iter().all(|c| c.is_zero()));
                         remainder.coeffs.pop();
                         remainder.deg_x -= 1;
                     }
                 }
                 quotient.update_degree();
                 remainder.update_degree();
+
                 assert!(
                     remainder.deg_x < divisor.degree()
                         && quotient.deg_x + divisor.degree() == self.deg_x
@@ -255,6 +253,10 @@ impl<F: Field> DensePolynomial<F> {
 
     // adjust/decrease degree in case there are leading zeros in X or Y
     fn update_degree(&mut self) {
+        if self.is_zero() {
+            *self = Self::zero();
+            return;
+        }
         // adjust deg_x
         while let Some(row) = self.coeffs.last() {
             if row.par_iter().all(|c| c.is_zero()) {
@@ -280,6 +282,7 @@ impl<F: Field> DensePolynomial<F> {
                 break;
             }
         }
+        assert!(!self.coeffs.is_empty(), "should never be empty");
     }
 }
 
@@ -578,6 +581,10 @@ impl<F: Field> Default for DensePolynomial<F> {
 
 impl<F: Field> fmt::Debug for DensePolynomial<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_zero() {
+            write!(f, "f(X,Y)=0")?;
+            return Ok(());
+        }
         let mut first_monomial_written = false;
         for (row_idx, row) in self.coeffs.iter().enumerate() {
             for (col_idx, cell) in row.iter().enumerate() {
@@ -783,5 +790,57 @@ mod tests {
             p.sub_assign_uv_poly(&-q_y, false);
             assert_eq!(p, p_old);
         }
+    }
+
+    #[test]
+    fn update_degree() {
+        let mut p = DensePolynomial {
+            coeffs: vec![vec![Fr::ONE, Fr::ONE], vec![Fr::ZERO, Fr::ZERO]],
+            deg_x: 1,
+            deg_y: 1,
+        };
+        p.update_degree();
+        assert!(p.deg_x == 0 && p.deg_y == 1);
+        let mut p = DensePolynomial {
+            coeffs: vec![
+                vec![Fr::ONE, Fr::ONE],
+                vec![Fr::ZERO, Fr::ZERO],
+                vec![Fr::ZERO, Fr::ZERO],
+                vec![Fr::ZERO, Fr::ZERO],
+            ],
+            deg_x: 3,
+            deg_y: 1,
+        };
+        p.update_degree();
+        assert!(p.deg_x == 0 && p.deg_y == 1);
+        let mut p = DensePolynomial {
+            coeffs: vec![
+                vec![Fr::ONE, Fr::ZERO],
+                vec![Fr::ZERO, Fr::ZERO],
+                vec![Fr::ZERO, Fr::ZERO],
+            ],
+            deg_x: 2,
+            deg_y: 1,
+        };
+        p.update_degree();
+        assert!(p.deg_x == 0 && p.deg_y == 0);
+        let mut p = DensePolynomial {
+            coeffs: vec![
+                vec![Fr::ONE, Fr::ZERO],
+                vec![Fr::ZERO, Fr::ZERO],
+                vec![Fr::ZERO, Fr::ONE],
+            ],
+            deg_x: 2,
+            deg_y: 1,
+        };
+        p.update_degree();
+        assert!(p.deg_x == 2 && p.deg_y == 1);
+        let mut p = DensePolynomial {
+            coeffs: vec![vec![Fr::ZERO, Fr::ZERO], vec![Fr::ZERO, Fr::ZERO]],
+            deg_x: 1,
+            deg_y: 1,
+        };
+        p.update_degree();
+        assert!(p.deg_x == 0 && p.deg_y == 0 && p.is_zero());
     }
 }

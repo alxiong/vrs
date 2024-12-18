@@ -91,7 +91,6 @@ mod tests {
 
             let proofs = super::multi_eval(&pk, &poly, &domain);
             let elements = domain.elements().collect::<Vec<_>>();
-            eprintln!("Degree: {}, DomainSize: {}", degree, domain.size);
             proofs
                 .par_iter()
                 .zip(elements.par_iter())
