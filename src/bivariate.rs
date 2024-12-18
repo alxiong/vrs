@@ -1,7 +1,7 @@
 //! Bivariate polynomial compatible with arkwork's trait and backend
 
 use ark_ff::{Field, Zero};
-use ark_poly::{DenseUVPolynomial, Polynomial};
+use ark_poly::{univariate, DenseUVPolynomial, Polynomial};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::{
     fmt,
@@ -51,12 +51,12 @@ pub struct DensePolynomial<F: Field> {
 }
 
 impl<F: Field> Polynomial<F> for DensePolynomial<F> {
-    type Point = [F; 2];
+    type Point = (F, F);
     fn degree(&self) -> usize {
         self.deg_x * self.deg_y
     }
     // full evaluation
-    fn evaluate(&self, [x, y]: &Self::Point) -> F {
+    fn evaluate(&self, (x, y): &Self::Point) -> F {
         self.coeffs
             .par_iter()
             .enumerate()
@@ -87,11 +87,10 @@ impl<F: Field> DensePolynomial<F> {
             deg_y,
         }
     }
-    /// internal use when we know inputs are safe, thus forgo further checks
-    #[allow(dead_code)]
-    pub(crate) fn new_unchecked(coeffs: Vec<Vec<F>>, deg_x: usize, deg_y: usize) -> Self {
+    /// Similar to `Self::zero()` but reserve space for degree>0
+    pub fn zero_with(deg_x: usize, deg_y: usize) -> Self {
         Self {
-            coeffs,
+            coeffs: vec![vec![F::zero(); deg_y + 1]; deg_x + 1],
             deg_x,
             deg_y,
         }
@@ -155,6 +154,75 @@ impl<F: Field> DensePolynomial<F> {
             })
             .collect();
         ark_poly::univariate::DensePolynomial::from_coefficients_vec(coeffs)
+    }
+
+    /// divide `self` with another univariate (in X or Y), returns both the quotient and remainder
+    /// f(X, Y) = q(X, Y) * divisor + r(X, Y)
+    /// divisor := g(X) if `in_x=true`; divisor := g(Y) if `in_x=false`.
+    pub fn divide_with_q_and_r(
+        &self,
+        divisor: &univariate::DensePolynomial<F>,
+        in_x: bool,
+    ) -> Option<(DensePolynomial<F>, DensePolynomial<F>)> {
+        if self.is_zero() {
+            Some((Self::zero(), Self::zero()))
+        } else if divisor.is_zero() {
+            panic!("Dividing by zero poly")
+        } else if in_x && self.deg_x < divisor.degree() {
+            Some((Self::zero(), self.clone()))
+        } else if !in_x && self.deg_y < divisor.degree() {
+            Some((Self::zero(), self.clone()))
+        } else if divisor.degree() == 0 {
+            let div_inv = divisor.coeffs[0].inverse().unwrap();
+            let mut quotient = self.clone();
+            quotient
+                .coeffs
+                .par_iter_mut()
+                .for_each(|row| row.par_iter_mut().for_each(|c| *c *= div_inv));
+            quotient.update_degree();
+            Some((quotient, Self::zero()))
+        } else {
+            if in_x {
+                let mut quotient = Self::zero_with(self.deg_x - divisor.degree(), self.deg_y);
+                let mut remainder = self.clone();
+                let divisor_leading_inv = divisor.last().unwrap().inverse().unwrap();
+                while !remainder.is_zero() && remainder.deg_x >= divisor.degree() {
+                    let cur_q_coeff: Vec<F> = remainder
+                        .coeffs
+                        .last()
+                        .unwrap()
+                        .par_iter()
+                        .map(|&c| c * &divisor_leading_inv)
+                        .collect();
+                    let cur_q_degree = remainder.deg_x - divisor.degree();
+                    quotient.coeffs[cur_q_degree] = cur_q_coeff.clone();
+
+                    divisor.iter().enumerate().for_each(|(i, div_coeff)| {
+                        remainder.coeffs[cur_q_degree + i]
+                            .par_iter_mut()
+                            .zip(cur_q_coeff.par_iter())
+                            .for_each(|(c, q_c)| *c -= *q_c * div_coeff)
+                    });
+                    while let Some(true) = remainder
+                        .coeffs
+                        .last()
+                        .map(|row| row.par_iter().all(|c| c.is_zero()))
+                    {
+                        remainder.coeffs.pop();
+                        remainder.deg_x -= 1;
+                    }
+                }
+                quotient.update_degree();
+                remainder.update_degree();
+                assert!(
+                    remainder.deg_x < divisor.degree()
+                        && quotient.deg_x + divisor.degree() == self.deg_x
+                );
+                Some((quotient, remainder))
+            } else {
+                todo!("similar to the clause above")
+            }
+        }
     }
 
     // adjust/decrease degree in case there are leading zeros in X or Y
@@ -603,14 +671,14 @@ mod tests {
         for _ in 0..100 {
             let dx = rng.gen_range(0..20) as usize;
             let dy = rng.gen_range(0..20) as usize;
-            let point = [Fr::rand(rng), Fr::rand(rng)];
+            let point = (Fr::rand(rng), Fr::rand(rng));
 
             let p1 = DensePolynomial::<Fr>::rand(dx, dy, rng);
             let mut expected = Fr::zero();
             for (row_idx, row) in p1.coeffs.iter().enumerate() {
                 for (col_idx, coeff) in row.iter().enumerate() {
                     expected +=
-                        *coeff * point[0].pow(&[row_idx as u64]) * point[1].pow(&[col_idx as u64]);
+                        *coeff * point.0.pow(&[row_idx as u64]) * point.1.pow(&[col_idx as u64]);
                 }
             }
             assert_eq!(p1.evaluate(&point), expected);
@@ -629,8 +697,34 @@ mod tests {
             let p = DensePolynomial::<Fr>::rand(dx, dy, rng);
             let g_y = p.partial_evaluate_x(&x);
             let g_x = p.partial_evaluate_y(&y);
-            assert_eq!(g_y.evaluate(&y), p.evaluate(&[x, y]));
-            assert_eq!(g_x.evaluate(&x), p.evaluate(&[x, y]));
+            assert_eq!(g_y.evaluate(&y), p.evaluate(&(x, y)));
+            assert_eq!(g_x.evaluate(&x), p.evaluate(&(x, y)));
+        }
+    }
+
+    #[test]
+    fn div_polys() {
+        let rng = &mut test_rng();
+        for _ in 0..100 {
+            let dx = rng.gen_range(0..20) as usize;
+            let dy = rng.gen_range(0..20) as usize;
+            // we allow larger than dx degree
+            let divisor_deg = rng.gen_range(0..dx + 5) as usize;
+
+            let p = DensePolynomial::<Fr>::rand(dx, dy, rng);
+            let divisor = ark_poly::univariate::DensePolynomial::rand(divisor_deg, rng);
+            if divisor.is_zero() {
+                continue;
+            }
+            let (quotient, remainder) = p.divide_with_q_and_r(&divisor, true).unwrap();
+
+            // since we didn't implement mixed-mul of bivariate and univariate f(X,Y) * g(X)
+            // we test "quotient * divisor + remainder = original" via evaluations at random points
+            let r = (Fr::rand(rng), Fr::rand(rng));
+            assert_eq!(
+                quotient.evaluate(&r) * divisor.evaluate(&r.0) + remainder.evaluate(&r),
+                p.evaluate(&r)
+            );
         }
     }
 }
