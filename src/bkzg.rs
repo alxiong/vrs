@@ -81,7 +81,8 @@ impl<E: Pairing> PolynomialCommitmentScheme for BivariateKzgPCS<E> {
             .par_iter()
             .zip(poly.coeffs.par_iter())
             .map(|(bases, coeffs)| {
-                <E::G1 as VariableBaseMSM>::msm(bases, coeffs).expect("msm during commit fail")
+                <E::G1 as VariableBaseMSM>::msm(&bases[..=poly.deg_y], coeffs)
+                    .expect("msm during commit fail")
             })
             .reduce(
                 || E::G1Affine::zero().into_group(),
@@ -99,14 +100,7 @@ impl<E: Pairing> PolynomialCommitmentScheme for BivariateKzgPCS<E> {
         // witness poly for partial eval at x:
         //   w1(X, Y) = (f(X, Y) - f(x, Y)) / (X - x)
         // pi_1 = g^w1(\tau_x, \tau_y)
-        let partial_eval = poly.partial_evaluate_x(&x);
-        let div_poly =
-            univariate::DensePolynomial::from_coefficients_slice(&[-*x, E::ScalarField::ONE]);
-        let mut witness_poly = poly.clone();
-        witness_poly.sub_assign_uv_poly(&partial_eval, false);
-        let (witness_poly, remainder) = witness_poly.divide_with_q_and_r(&div_poly, true).unwrap();
-        assert!(remainder.is_zero());
-        let pi_1 = Self::commit(pk, &witness_poly)?;
+        let (pi_1, partial_eval) = Self::partial_eval(pk, poly, x, true)?;
 
         // second witness poly for full eval on the partial evaluated univariate poly
         //   w2(Y) = (f(x, Y) - f(x, y)) / (Y - y) = (g(Y) - g(y)) / (Y-y)
@@ -132,7 +126,7 @@ impl<E: Pairing> PolynomialCommitmentScheme for BivariateKzgPCS<E> {
     }
 
     fn verify(
-        vk: &<Self::SRS as StructuredReferenceString>::VerifierParam,
+        vk: &BivariateVerifierParam<E>,
         commitment: &Self::Commitment,
         (x, y): &Self::Point,
         value: &Self::Evaluation,
@@ -185,6 +179,102 @@ impl<E: Pairing> PolynomialCommitmentScheme for BivariateKzgPCS<E> {
     }
 }
 
+/// Proof for partial-evaluation g(Y) = f(x, Y) at X=x or g(X) = f(X, y) at Y=y
+pub type PartialEvalProof<E> = <E as Pairing>::G1Affine;
+
+impl<E: Pairing> BivariateKzgPCS<E> {
+    /// Similar to `Self::open()` but only partial evaluate at X=x (or Y=y) with a proof
+    /// Returns a partial-eval proof and the partial-evaluation g(Y) = f(x, Y) or g(X) = f(X, y)
+    pub fn partial_eval(
+        pk: impl Borrow<BivariateProverParam<E>>,
+        poly: &DensePolynomial<E::ScalarField>,
+        point: &E::ScalarField,
+        at_x: bool,
+    ) -> Result<
+        (
+            PartialEvalProof<E>,
+            univariate::DensePolynomial<E::ScalarField>,
+        ),
+        PCSError,
+    > {
+        // witness poly at x:
+        //   w(X, Y) = (f(X, Y) - f(x, Y)) / (X-x)
+        // witness poly at y:
+        //   w(X, Y) = (f(X, Y) - f(X, y)) / (Y-y)
+        // then the proof is the commitment to the witness poly
+        // pi = g^w(\tau_x, \tau_y)
+        let partial_eval = if at_x {
+            poly.partial_evaluate_at_x(point)
+        } else {
+            poly.partial_evaluate_at_y(point)
+        };
+        let partial_eval_in_x = !at_x;
+        let div_poly_in_x = at_x;
+
+        let div_poly =
+            univariate::DensePolynomial::from_coefficients_slice(&[-*point, E::ScalarField::ONE]);
+        let mut witness_poly = poly.clone();
+        witness_poly.sub_assign_uv_poly(&partial_eval, partial_eval_in_x);
+        let (witness_poly, remainder) = witness_poly
+            .divide_with_q_and_r(&div_poly, div_poly_in_x)
+            .unwrap();
+        assert!(remainder.is_zero());
+
+        let proof = <Self as PolynomialCommitmentScheme>::commit(pk, &witness_poly)?;
+
+        Ok((proof, partial_eval))
+    }
+
+    /// Similar to `Self::verify()` but for partial-evaluations
+    /// g(Y) = f(x, Y) at X=x (if `at_x=true`)
+    /// or g(X) = f(X, y) at Y=y (if `at_x=false`)
+    pub fn verify_partial(
+        vk: &BivariateVerifierParam<E>,
+        commitment: &E::G1Affine,
+        point: &E::ScalarField,
+        at_x: bool,
+        partial_eval: &univariate::DensePolynomial<E::ScalarField>,
+        proof: &PartialEvalProof<E>,
+    ) -> Result<bool, PCSError> {
+        // for g(Y) = f(x, Y), we verify
+        //   e(pi, (\tau_x-x)H) =?= e(C-g(\tau_y)G, H)
+        // for g(X) = f(X, y), we verify
+        //   e(pi, (\tau_y-y)H) =?= e(C-g(\tau_x)G, H)
+        // where xG is group exponentiation with generator G
+        //
+        // for notation, we refer g(\tau_*)G as partial_eval_in_exp
+        if at_x {
+            let partial_eval_in_exp = <E::G1 as VariableBaseMSM>::msm(
+                &vk.tau_y_g_powers[..=partial_eval.degree()],
+                &partial_eval.coeffs,
+            )
+            .expect("msm failed");
+
+            let verified = E::multi_pairing(
+                &[proof.into_group(), partial_eval_in_exp - commitment],
+                &[vk.tau_x_h.into_group() - vk.h * point, vk.h.into_group()],
+            )
+            .0
+            .is_one();
+            Ok(verified)
+        } else {
+            let partial_eval_in_exp = <E::G1 as VariableBaseMSM>::msm(
+                &vk.tau_x_g_powers[..=partial_eval.degree()],
+                &partial_eval.coeffs,
+            )
+            .expect("msm failed");
+
+            let verified = E::multi_pairing(
+                &[proof.into_group(), partial_eval_in_exp - commitment],
+                &[vk.tau_y_h.into_group() - vk.h * point, vk.h.into_group()],
+            )
+            .0
+            .is_one();
+            Ok(verified)
+        }
+    }
+}
+
 impl<E: Pairing> BivariateKzgSRS<E> {
     /// The maximum supported degree in X
     pub fn max_deg_x(&self) -> usize {
@@ -207,6 +297,12 @@ pub struct BivariateProverParam<E: Pairing> {
 pub struct BivariateVerifierParam<E: Pairing> {
     /// G1 generator
     pub g: E::G1Affine,
+    /// powers_of_g only first column (for powers of tau_x in the exponent)
+    /// used for verification of partial-eval
+    pub tau_x_g_powers: Vec<E::G1Affine>,
+    /// powers_of_g only first row (for powers of tau_y in the exponent)
+    /// used for verification of partial-eval
+    pub tau_y_g_powers: Vec<E::G1Affine>,
     /// G2 generator
     pub h: E::G2Affine,
     /// tau_x * h
@@ -240,9 +336,16 @@ impl<E: Pairing> StructuredReferenceString for BivariateKzgSRS<E> {
                 .collect::<Vec<_>>(),
         }
     }
-    fn extract_verifier_param(&self, _supported_degree: usize) -> Self::VerifierParam {
+    fn extract_verifier_param(&self, supported_degree: usize) -> Self::VerifierParam {
+        let (deg_x, deg_y) = split_u64(supported_degree as u64);
+        let (deg_x, deg_y) = (deg_x as usize, deg_y as usize);
         BivariateVerifierParam {
             g: self.powers_of_g[0][0],
+            tau_x_g_powers: self.powers_of_g[..=deg_x]
+                .par_iter()
+                .map(|row| row[0].clone())
+                .collect(),
+            tau_y_g_powers: self.powers_of_g[0][..=deg_y].to_vec(),
             h: self.h,
             tau_x_h: self.tau_x_h,
             tau_y_h: self.tau_y_h,
@@ -351,7 +454,7 @@ mod tests {
     }
 
     #[test]
-    fn bkzg() {
+    fn bkzg_basic() {
         let rng = &mut test_rng();
         let max_deg_x = 128;
         let max_deg_y = 16;
@@ -375,6 +478,58 @@ mod tests {
 
                 assert_eq!(eval, poly.evaluate(&point));
                 assert!(BivariateKzgPCS::verify(&vk, &cm, &point, &eval, &proof).unwrap());
+            }
+        }
+    }
+
+    #[test]
+    fn partial_eval_proof() {
+        let rng = &mut test_rng();
+        let max_deg_x = 128;
+        let max_deg_y = 16;
+        let hacky_supported_degree = combine_u32(max_deg_x, max_deg_y);
+        let pp =
+            BivariateKzgPCS::<Bn254>::gen_srs_for_testing(rng, hacky_supported_degree as usize)
+                .unwrap();
+
+        for _ in 0..5 {
+            let deg_x = rng.gen_range(8..max_deg_x);
+            let deg_y = rng.gen_range(1..max_deg_y);
+            let supported_degree = combine_u32(deg_x, deg_y);
+            let (pk, vk) = BivariateKzgPCS::trim(&pp, supported_degree as usize, None).unwrap();
+
+            let poly = DensePolynomial::rand(deg_x as usize, deg_y as usize, rng);
+            let cm = BivariateKzgPCS::commit(&pk, &poly).unwrap();
+
+            // first test partial-evaluate at x
+            for _ in 0..10 {
+                let x = Fr::rand(rng);
+                let (proof, partial_eval) =
+                    BivariateKzgPCS::partial_eval(&pk, &poly, &x, true).unwrap();
+
+                assert_eq!(partial_eval, poly.partial_evaluate_at_x(&x));
+                assert!(
+                    BivariateKzgPCS::verify_partial(&vk, &cm, &x, true, &partial_eval, &proof)
+                        .unwrap()
+                );
+            }
+
+            // then test partial-evaluate at y
+            for _ in 0..10 {
+                let y = Fr::rand(rng);
+                let (proof, partial_eval) =
+                    BivariateKzgPCS::partial_eval(&pk, &poly, &y, false).unwrap();
+
+                assert_eq!(partial_eval, poly.partial_evaluate_at_y(&y));
+                assert!(BivariateKzgPCS::verify_partial(
+                    &vk,
+                    &cm,
+                    &y,
+                    false,
+                    &partial_eval,
+                    &proof
+                )
+                .unwrap());
             }
         }
     }

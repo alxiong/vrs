@@ -109,7 +109,7 @@ impl<F: Field> DensePolynomial<F> {
     }
 
     /// Partial-evaluate f(X, Y) at concrete x, returns univariate poly G(Y) = f(x, Y)
-    pub fn partial_evaluate_x(&self, x: &F) -> ark_poly::univariate::DensePolynomial<F> {
+    pub fn partial_evaluate_at_x(&self, x: &F) -> ark_poly::univariate::DensePolynomial<F> {
         // first compute v = (1, x, x^2, ... , x^d_x),
         let x_pows: Vec<F> = successors(Some(F::ONE), |&prev| Some(prev * x))
             .take(self.deg_x + 1)
@@ -136,7 +136,7 @@ impl<F: Field> DensePolynomial<F> {
     }
 
     /// Partial-evaluate f(X, Y) at concrete y, returns univariate poly G(X) = f(X, y)
-    pub fn partial_evaluate_y(&self, y: &F) -> ark_poly::univariate::DensePolynomial<F> {
+    pub fn partial_evaluate_at_y(&self, y: &F) -> ark_poly::univariate::DensePolynomial<F> {
         // first compute v = (1, y, y^2, ..., y^d_y),
         let y_pows: Vec<F> = successors(Some(F::ONE), |&prev| Some(prev * y))
             .take(self.deg_y + 1)
@@ -218,7 +218,56 @@ impl<F: Field> DensePolynomial<F> {
                 );
                 Some((quotient, remainder))
             } else {
-                todo!("similar to the clause above")
+                let mut quotient = Self::zero_with(self.deg_x, self.deg_y - divisor.degree());
+                let mut remainder = self.clone();
+                let divisor_leading_inv = divisor.last().unwrap().inverse().unwrap();
+                while !remainder.is_zero() && remainder.deg_y >= divisor.degree() {
+                    let cur_q_coeff: Vec<F> = remainder
+                        .coeffs
+                        .par_iter()
+                        .map(|row| {
+                            let c = row.last().unwrap();
+                            *c * &divisor_leading_inv
+                        })
+                        .collect();
+                    let cur_q_degree = remainder.deg_y - divisor.degree();
+                    quotient
+                        .coeffs
+                        .par_iter_mut()
+                        .enumerate()
+                        .for_each(|(idx, row)| row[cur_q_degree] = cur_q_coeff[idx]);
+                    // Help me finish this part, using the analogous logic as the previous case
+                    // but now the along the columns where self.coeffs are stored as row-wise matrix
+                    //
+                    divisor.iter().enumerate().for_each(|(i, div_coeff)| {
+                        remainder
+                            .coeffs
+                            .par_iter_mut()
+                            .enumerate()
+                            .for_each(|(idx, row)| {
+                                row[cur_q_degree + i] -= cur_q_coeff[idx] * div_coeff
+                            })
+                    });
+                    if let Some(column) = remainder
+                        .coeffs
+                        .iter_mut()
+                        .map(|row| row.last())
+                        .collect::<Option<Vec<_>>>()
+                    {
+                        assert!(column.par_iter().all(|c| c.is_zero()));
+                        remainder.coeffs.iter_mut().for_each(|row| {
+                            row.pop();
+                        });
+                        remainder.deg_y -= 1;
+                    }
+                }
+                quotient.update_degree();
+                remainder.update_degree();
+                assert!(
+                    remainder.deg_y < divisor.degree()
+                        && quotient.deg_y + divisor.degree() == self.deg_y
+                );
+                Some((quotient, remainder))
             }
         }
     }
@@ -730,8 +779,8 @@ mod tests {
             let y = Fr::rand(rng);
 
             let p = DensePolynomial::<Fr>::rand(dx, dy, rng);
-            let g_y = p.partial_evaluate_x(&x);
-            let g_x = p.partial_evaluate_y(&y);
+            let g_y = p.partial_evaluate_at_x(&x);
+            let g_x = p.partial_evaluate_at_y(&y);
             assert_eq!(g_y.evaluate(&y), p.evaluate(&(x, y)));
             assert_eq!(g_x.evaluate(&x), p.evaluate(&(x, y)));
         }
@@ -748,16 +797,25 @@ mod tests {
 
             let p = DensePolynomial::<Fr>::rand(dx, dy, rng);
             let divisor = ark_poly::univariate::DensePolynomial::rand(divisor_deg, rng);
+            let in_x = true;
             if divisor.is_zero() {
                 continue;
             }
-            let (quotient, remainder) = p.divide_with_q_and_r(&divisor, true).unwrap();
+            let (quotient, remainder) = p.divide_with_q_and_r(&divisor, in_x).unwrap();
 
             // since we didn't implement mixed-mul of bivariate and univariate f(X,Y) * g(X)
             // we test "quotient * divisor + remainder = original" via evaluations at random points
             let r = (Fr::rand(rng), Fr::rand(rng));
             assert_eq!(
                 quotient.evaluate(&r) * divisor.evaluate(&r.0) + remainder.evaluate(&r),
+                p.evaluate(&r)
+            );
+
+            // now test against y
+            let in_x = false;
+            let (quotient, remainder) = p.divide_with_q_and_r(&divisor, in_x).unwrap();
+            assert_eq!(
+                quotient.evaluate(&r) * divisor.evaluate(&r.1) + remainder.evaluate(&r),
                 p.evaluate(&r)
             );
         }
