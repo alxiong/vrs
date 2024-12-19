@@ -425,13 +425,12 @@ impl<E: Pairing> StructuredReferenceString for BivariateKzgSRS<E> {
 
 // returns (higher, lower) halves of u64
 #[inline(always)]
-pub(crate) fn split_u64(x: u64) -> (u32, u32) {
+pub fn split_u64(x: u64) -> (u32, u32) {
     ((x >> 32) as u32, x as u32)
 }
 
 #[inline(always)]
-#[allow(dead_code)]
-pub(crate) fn combine_u32(high: u32, low: u32) -> u64 {
+pub fn combine_u32(high: u32, low: u32) -> u64 {
     ((high as u64) << 32) | (low as u64)
 }
 

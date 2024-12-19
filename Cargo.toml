@@ -14,6 +14,7 @@ ark-poly = "^0.4.2"
 ark-serialize = "^0.4.2"
 ark-std = "^0.4.0"
 derivative = { version = "2", features = ["use_core"] }
+itertools = "0.13.0"
 jf-pcs = { git = "https://github.com/EspressoSystems/jellyfish", version = "0.1.0", default-features = false, features = ["test-srs"] }
 p3-maybe-rayon = "0.2"
 thiserror = "2"
@@ -28,4 +29,8 @@ print-trace = ["ark-std/print-trace"]
 
 [[bench]]
 name = "multi_evals"
+harness = false
+
+[[bench]]
+name = "bkzg"
 harness = false
