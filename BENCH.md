@@ -2,20 +2,41 @@
 
 _note_: all following data are run on an Apple M1 with 16GB RAM.
 
-## Multi-evaluations for Univariate Polynomials
+## MultiEval for Univariate Polynomials
 
 Run `cargo bench --bench multi_evals`:
 
 ```
-Univariate Multi-evaluations/::Fast: Deg=2^10, |Domain|=2^12
+Univariate MultiEval/Fast: Deg=2^10, |Domain|=2^12
                         time:   [1.3931 s 1.4172 s 1.4427 s]
-Univariate Multi-evaluations/::Naive: Deg=2^10, |Domain|=2^12
+Univariate MultiEval/Naive: Deg=2^10, |Domain|=2^12
                         time:   [8.4841 s 8.6339 s 8.8074 s]
 
-Univariate Multi-evaluations/::Fast: Deg=2^10, |Domain|=2^15
+Univariate MultiEval/Fast: Deg=2^10, |Domain|=2^15
                         time:   [9.8249 s 10.015 s 10.213 s]
-Univariate Multi-evaluations/::Naive: Deg=2^10, |Domain|=2^15
+Univariate MultiEval/Naive: Deg=2^10, |Domain|=2^15
                         time:   [71.133 s 71.767 s 72.791 s]
+```
+
+## MultiPartialEval for Bivariate Polynomials
+
+```
+Bivariate MultiPartialEval/Fast: deg_x=8, deg_y=2^10, |Domain|=2^11
+                        time:   [2.2215 s 2.2650 s 2.3067 s]
+Bivariate MultiPartialEval/Naive: deg_x=8, deg_y=2^10, |Domain|=2^11
+                        time:   [38.202 s 38.432 s 38.683 s]
+```
+
+In comparison to ADVZ-style:
+```
+Start:   AdvzVRS::compute shares (k=1024, n=2048, L=8)
+··Start:   encode data
+··End:     encode data .............................................................1.469ms
+··Start:   commit row_poly
+··End:     commit row_poly .........................................................24.137ms
+··Start:   multi-eval on agg_poly
+··End:     multi-eval on agg_poly ..................................................895.739ms
+End:     AdvzVRS::compute shares (k=1024, n=2048, L=8) .............................931.131ms
 ```
 
 ## Bivariate KZG

@@ -295,9 +295,9 @@ mod tests {
     #[test]
     fn test_advz_vrs() {
         let rng = &mut test_rng();
-        let k = 100;
-        let l = 16;
-        let n = 256;
+        let k = 2usize.pow(10);
+        let l = 8;
+        let n = 2usize.pow(11);
 
         let pp = AdvzVRS::<Bn254>::setup(k - 1, l - 1, rng).unwrap();
         let domain = Radix2EvaluationDomain::new(n).unwrap();
