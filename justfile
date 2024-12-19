@@ -3,7 +3,7 @@ default:
 
 benchmark:
     @echo "Benchmarking ..."
-    cargo test --release --features print-trace advz -- --nocapture
+    cargo bench
     @echo "Done!"
 
 # Run a test named "tmp"

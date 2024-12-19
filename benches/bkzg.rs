@@ -107,7 +107,6 @@ fn e2e(c: &mut Criterion) {
     }
 }
 
-// criterion_group!(benches, partial_eval_x_vs_y, e2e);
-criterion_group!(benches, e2e);
+criterion_group!(benches, partial_eval_x_vs_y, e2e);
 
 criterion_main!(benches);
