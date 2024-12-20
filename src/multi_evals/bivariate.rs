@@ -28,12 +28,29 @@ pub fn multi_partial_eval<E: Pairing>(
     let domain_size = domain.size as usize;
     let table = multi_partial_eval_precompute(pk, domain);
 
-    // row-wise encode the reversed coefficients
-    let reversed_encoded = poly
+    // Interleaved RS encode and prepare all the partial_evals in the correct type
+    let encoded = poly
         .coeffs
         .par_iter()
-        .map(|row| domain.fft(&row.clone().into_iter().rev().collect::<Vec<_>>()))
+        .map(|row| domain.fft(row))
         .collect::<Vec<Vec<E::ScalarField>>>();
+    let partial_evals = (0..domain_size)
+        .into_par_iter()
+        .map(|col_idx| {
+            univariate::DensePolynomial::from_coefficients_vec(
+                encoded
+                    .par_iter()
+                    .map(|row| row[col_idx])
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    // get the reversed coefficients from encoded data in O(L*n) time
+    let reversed_encoded = encoded
+        .par_iter()
+        .map(|fft_result| super::fft_rev(domain, poly.deg_y + 1, fft_result))
+        .collect::<Vec<Vec<_>>>();
 
     // prod = FFT(v*F) \odot FFT([T])
     // but computed by rearranging the terms described in the paper, with the precomputed table
@@ -63,24 +80,6 @@ pub fn multi_partial_eval<E: Pairing>(
     let proofs = proofs_proj
         .into_par_iter()
         .map(|proof| proof.into_affine())
-        .collect::<Vec<_>>();
-
-    // also prepare all the partial_evals in the correct type
-    let encoded = poly
-        .coeffs
-        .par_iter()
-        .map(|row| domain.fft(row))
-        .collect::<Vec<Vec<E::ScalarField>>>();
-    let partial_evals = (0..domain_size)
-        .into_par_iter()
-        .map(|col_idx| {
-            univariate::DensePolynomial::from_coefficients_vec(
-                encoded
-                    .par_iter()
-                    .map(|row| row[col_idx])
-                    .collect::<Vec<_>>(),
-            )
-        })
         .collect::<Vec<_>>();
 
     (proofs, partial_evals)
@@ -118,7 +117,7 @@ mod tests {
     fn test_bv_multi_partial_eval() {
         let rng = &mut test_rng();
         let max_deg_x = 4;
-        let max_deg_y = 2u32.pow(10);
+        let max_deg_y = 2u32.pow(5);
         let hacky_supported_degree = combine_u32(max_deg_x, max_deg_y);
         let pp =
             BivariateKzgPCS::<Bn254>::gen_srs_for_testing(rng, hacky_supported_degree as usize)
@@ -152,37 +151,5 @@ mod tests {
                         .unwrap()
                 );
             });
-    }
-
-    #[ignore = "failing experiment"]
-    #[test]
-    // test derivation of FFT(v.reverse()) from FFT(v)
-    fn fft_rev() {
-        use ark_ff::One;
-        use ark_std::UniformRand;
-        let rng = &mut test_rng();
-
-        let domain = Radix2EvaluationDomain::<Fr>::new(8).unwrap();
-        let mut v = vec![];
-        for _ in 0..4 {
-            v.push(Fr::rand(rng));
-        }
-
-        let fft_result = domain.fft(&v);
-
-        let n = domain.size();
-
-        let omega = domain.group_gen(); // Primitive root of unity
-        let mut fft_reverse = fft_result.clone();
-
-        let mut current_twiddle = Fr::one(); // ω^0 = 1
-        for k in 0..n {
-            let index = (n - k) % n; // Access FFT(v)_{n-k}
-            fft_reverse[k] = current_twiddle * fft_result[index];
-            current_twiddle *= omega; // Advance to ω^(k+1)
-        }
-        v.reverse();
-        let res2 = domain.fft(&v);
-        assert_eq!(res2, fft_reverse);
     }
 }

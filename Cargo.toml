@@ -34,3 +34,7 @@ harness = false
 [[bench]]
 name = "bkzg"
 harness = false
+
+[[bench]]
+name = "fft_rev"
+harness = false

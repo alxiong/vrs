@@ -151,3 +151,23 @@ bKZG::e2e::deg_x=32,deg_y=65536/verify_parital
 bKZG::PartialEval/at X  time:   [2.4542 s 2.4820 s 2.5110 s]
 bKZG::PartialEval/at Y  time:   [2.4231 s 2.4691 s 2.5164 s]
 ```
+
+## Auxiliary 
+
+The fast version of `fft_rev()` v.s. naive `fft(v.rev())`:
+```
+fft_rev::deg=8192,domain_size=16384/fast
+                        time:   [339.30 µs 340.06 µs 341.19 µs]
+fft_rev::deg=8192,domain_size=16384/naive
+                        time:   [1.7861 ms 1.7899 ms 1.7931 ms]
+
+fft_rev::deg=8192,domain_size=32768/fast
+                        time:   [591.86 µs 594.32 µs 597.31 µs]
+fft_rev::deg=8192,domain_size=32768/naive
+                        time:   [2.8845 ms 2.8932 ms 2.9038 ms]
+
+fft_rev::deg=8192,domain_size=65536/fast
+                        time:   [1.2275 ms 1.2457 ms 1.2746 ms]
+fft_rev::deg=8192,domain_size=65536/naive
+                        time:   [4.6611 ms 4.7637 ms 4.9163 ms]
+```
