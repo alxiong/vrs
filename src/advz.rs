@@ -8,17 +8,14 @@
 //! - Algorithm 1 in https://eprint.iacr.org/2021/1500
 
 use crate::{
-    matrix::Matrix, multi_evals::univariate::multi_eval, VerifiableReedSolomon, VrsError, VrsShare,
-};
-use anyhow::anyhow;
-use ark_crypto_primitives::{
-    crh,
-    merkle_tree::{self, ByteDigestConverter},
+    matrix::Matrix,
+    merkle_tree::{self, SymbolMerkleTree, SymbolMerkleTreeParams},
+    multi_evals::univariate::multi_eval,
+    VerifiableReedSolomon, VrsError, VrsShare,
 };
 use ark_ec::{pairing::Pairing, CurveGroup, VariableBaseMSM};
 use ark_ff::{FftField, PrimeField};
 use ark_poly::{EvaluationDomain, Radix2EvaluationDomain};
-use ark_serialize::CanonicalSerialize;
 use ark_std::{
     end_timer,
     fmt::Debug,
@@ -45,14 +42,11 @@ where
     type VerifierKey = AdvzVRSVerifierKey<E>;
     // (merkle_root, [row_poly_cms])
     type Commitment = (
-        <SymbolMerkleTreeParams as merkle_tree::Config>::InnerDigest,
+        <SymbolMerkleTreeParams<F> as merkle_tree::Config>::InnerDigest,
         Vec<Commitment<E>>,
     );
     // proof consists of (merkle_path, evaluation_proof)
-    type Proof = (
-        merkle_tree::Path<SymbolMerkleTreeParams>,
-        UnivariateKzgProof<E>,
-    );
+    type Proof = (merkle_tree::Path<F>, UnivariateKzgProof<E>);
 
     fn setup<R>(
         max_row_degree: usize,
@@ -116,22 +110,11 @@ where
 
         // 2. construct a merkle tree from the encoded matrix, each leaf is a L-size vector
         // TODO: directly pass in an iterator to MerkleTree constructor instead of collect it first
-        let leaves = encoded
-            .par_col()
-            .map(|col| {
-                let mut bytes = vec![];
-                col.serialize_compressed(&mut bytes)
-                    .expect("fail to serialize");
-                bytes
-            })
-            .collect::<Vec<_>>();
-        let mt = SymbolMerkleTree::new(&(), &(), leaves)
-            .map_err(|_| VrsError::Anyhow(anyhow!("failed to construct symbol mt")))?;
+        let leaves = encoded.par_col().collect::<Vec<_>>();
+        let mt = SymbolMerkleTree::<F>::new(leaves);
 
         // 3. from the merkle root, derive a random scalar to linearly combine k row-wise poly into 1 aggregated poly
-        let r = F::from_base_prime_field(
-            <F::BasePrimeField as PrimeField>::from_le_bytes_mod_order(&mt.root()),
-        );
+        let r = mt.root_as_field();
         // aggregated_poly = r^0 * poly_0 + r^1 * poly_1 + ... + r^{L-1} * poly_{L-1}
         let mut r_i = F::ONE;
         let agg_poly = row_polys
@@ -160,9 +143,7 @@ where
             .into_par_iter()
             .zip(encoded.par_col_enumerate())
             .map(|(eval_proof, (col_idx, data))| {
-                let mt_proof = mt
-                    .generate_proof(col_idx)
-                    .expect("fail to compute merkle proof");
+                let mt_proof = mt.generate_proof(col_idx);
 
                 VrsShare {
                     data,
@@ -198,9 +179,7 @@ where
         let row_poly_cms: Vec<_> = comm.1.par_iter().map(|x| x.0).collect();
 
         // 1. verify merkle proof
-        let mut leaf = vec![];
-        share.data.serialize_compressed(&mut leaf)?;
-        if !path.verify(&(), &(), root, leaf)? {
+        if !path.verify(root, share.data.as_slice()) {
             return Ok(false);
         }
 
@@ -267,22 +246,6 @@ pub struct AdvzVRSVerifierKey<E: Pairing> {
     /// n: total evaluation domain size (= num_nodes)
     pub domain_size: usize,
 }
-
-/// Parameter for a Merkle tree whose leaves are a symbol in RS codeword
-/// This param is for MT that uses byte-oriented hash/compression function
-pub struct SymbolMerkleTreeParams;
-
-impl merkle_tree::Config for SymbolMerkleTreeParams {
-    type Leaf = [u8];
-    type LeafDigest = Vec<u8>; // always 32 bytes
-    type LeafInnerDigestConverter = ByteDigestConverter<Self::LeafDigest>;
-    type InnerDigest = Vec<u8>; // always 32 bytes
-    type LeafHash = crh::sha256::Sha256;
-    type TwoToOneHash = crh::sha256::Sha256;
-}
-
-/// Merkle tree whose leaves are a symbol in RS codeword
-pub type SymbolMerkleTree = merkle_tree::MerkleTree<SymbolMerkleTreeParams>;
 
 #[cfg(test)]
 mod tests {
