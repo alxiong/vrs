@@ -84,17 +84,17 @@ fn bv_multi_partial_eval_naive<E: Pairing>(
 }
 
 fn bivariate(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Bivariate MultiPartialEval");
+    let mut group = c.benchmark_group("Bivariate MultiPartialEval DAS");
     group.sample_size(10);
 
     let rng = &mut test_rng();
-    let max_deg_x = 8;
-    let max_deg_y = 2u32.pow(10);
+    let max_deg_x = 256;
+    let max_deg_y = 2u32.pow(14);
     let hacky_supported_degree = combine_u32(max_deg_x, max_deg_y);
     let pp = BivariateKzgPCS::<Bn254>::gen_srs_for_testing(rng, hacky_supported_degree as usize)
         .unwrap();
 
-    for log_deg_y in [10] {
+    for log_deg_y in 8..15 {
         let deg_x = max_deg_x;
         let deg_y = 2u32.pow(log_deg_y);
         let supported_degree = combine_u32(deg_x, deg_y);
@@ -105,27 +105,70 @@ fn bivariate(c: &mut Criterion) {
 
         group.bench_function(
             format!(
-                "Fast: deg_x={}, deg_y=2^{}, |Domain|=2^{}",
+                "Fast DAS: deg_x={}, deg_y=2^{}, |Domain|=2^{}",
                 deg_x,
                 log_deg_y,
                 log_deg_y + 1
             ),
             |b| b.iter(|| vrs::multi_evals::bivariate::multi_partial_eval(&pk, &poly, &domain)),
         );
+        // group.bench_function(
+        //     format!(
+        //         "Naive: deg_x={}, deg_y=2^{}, |Domain|=2^{}",
+        //         deg_x,
+        //         log_deg_y,
+        //         log_deg_y + 1
+        //     ),
+        //     |b| b.iter(|| bv_multi_partial_eval_naive(&pk, &poly, &domain)),
+        // );
+    }
+    group.finish();
+}
+
+fn bivariate_vid(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Bivariate MultiPartialEval VID");
+    group.sample_size(10);
+
+    let rng = &mut test_rng();
+    let max_deg_x = 1 << 14;
+    let max_deg_y = 256;
+    let hacky_supported_degree = combine_u32(max_deg_x, max_deg_y);
+    let pp = BivariateKzgPCS::<Bn254>::gen_srs_for_testing(rng, hacky_supported_degree as usize)
+        .unwrap();
+
+    for log_deg_x in 8..15 {
+        let log_deg_y = 8;
+        let deg_x = 1 << log_deg_x;
+        let deg_y = max_deg_y;
+        let supported_degree = combine_u32(deg_x, deg_y);
+        let (pk, _vk) = BivariateKzgPCS::trim(&pp, supported_degree as usize, None).unwrap();
+        let domain = Radix2EvaluationDomain::<Fr>::new(2 * deg_y as usize).unwrap();
+
+        let poly = bivariate::DensePolynomial::rand(deg_x as usize, deg_y as usize, rng);
+
         group.bench_function(
             format!(
-                "Naive: deg_x={}, deg_y=2^{}, |Domain|=2^{}",
+                "Fast VID: deg_x={}, deg_y=2^{}, |Domain|=2^{}",
                 deg_x,
                 log_deg_y,
                 log_deg_y + 1
             ),
-            |b| b.iter(|| bv_multi_partial_eval_naive(&pk, &poly, &domain)),
+            |b| b.iter(|| vrs::multi_evals::bivariate::multi_partial_eval(&pk, &poly, &domain)),
         );
+        // group.bench_function(
+        //     format!(
+        //         "Naive: deg_x={}, deg_y=2^{}, |Domain|=2^{}",
+        //         deg_x,
+        //         log_deg_y,
+        //         log_deg_y + 1
+        //     ),
+        //     |b| b.iter(|| bv_multi_partial_eval_naive(&pk, &poly, &domain)),
+        // );
     }
     group.finish();
 }
 
 // criterion_group!(benches, univariate, bivariate);
-criterion_group!(benches, bivariate);
+criterion_group!(benches, bivariate, bivariate_vid);
 
 criterion_main!(benches);
