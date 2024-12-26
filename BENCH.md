@@ -22,7 +22,18 @@ Univariate MultiEval/Naive: Deg=2^10, |Domain|=2^15
 
 ```
 Bivariate MultiPartialEval/Fast: deg_x=8, deg_y=2^10, |Domain|=2^11
-                        time:   [2.2215 s 2.2650 s 2.3067 s]
+                        time:   [713.12 ms 715.47 ms 718.14 ms]
+Bivariate MultiPartialEval/Fast: deg_x=8, deg_y=2^11, |Domain|=2^12
+                        time:   [1.2045 s 1.2165 s 1.2281 s]
+Bivariate MultiPartialEval/Fast: deg_x=8, deg_y=2^12, |Domain|=2^13
+                        time:   [2.2942 s 2.3190 s 2.3512 s]
+Bivariate MultiPartialEval/Fast: deg_x=8, deg_y=2^13, |Domain|=2^14
+                        time:   [4.7603 s 4.7878 s 4.8180 s]
+Bivariate MultiPartialEval/Fast: deg_x=8, deg_y=2^14, |Domain|=2^15
+                        time:   [10.367 s 10.687 s 11.037 s]
+Bivariate MultiPartialEval/Fast: deg_x=8, deg_y=2^15, |Domain|=2^16
+                        time:   [22.090 s 22.747 s 23.452 s]
+====
 Bivariate MultiPartialEval/Naive: deg_x=8, deg_y=2^10, |Domain|=2^11
                         time:   [38.202 s 38.432 s 38.683 s]
 ```
