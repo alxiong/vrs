@@ -13,7 +13,7 @@ use jf_pcs::prelude::*;
 use p3_maybe_rayon::prelude::*;
 use vrs::{bivariate, bkzg::*};
 
-use criterion::Criterion;
+use criterion::{BenchmarkId, Criterion};
 
 /// a CryptoRng
 pub fn test_rng() -> StdRng {
@@ -84,17 +84,17 @@ fn bv_multi_partial_eval_naive<E: Pairing>(
 }
 
 fn bivariate(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Bivariate MultiPartialEval DAS");
+    let mut group = c.benchmark_group("BivariateMultiPartialEval");
     group.sample_size(10);
 
     let rng = &mut test_rng();
-    let max_deg_x = 256;
-    let max_deg_y = 2u32.pow(14);
+    let max_deg_x = 64;
+    let max_deg_y = 2u32.pow(16);
     let hacky_supported_degree = combine_u32(max_deg_x, max_deg_y);
     let pp = BivariateKzgPCS::<Bn254>::gen_srs_for_testing(rng, hacky_supported_degree as usize)
         .unwrap();
 
-    for log_deg_y in 8..15 {
+    for log_deg_y in 10..=16 {
         let deg_x = max_deg_x;
         let deg_y = 2u32.pow(log_deg_y);
         let supported_degree = combine_u32(deg_x, deg_y);
@@ -104,14 +104,18 @@ fn bivariate(c: &mut Criterion) {
         let poly = bivariate::DensePolynomial::<Fr>::rand(deg_x as usize, deg_y as usize, rng);
 
         let table = vrs::multi_evals::bivariate::multi_partial_eval_precompute(&pk, &domain);
-        group.bench_function(
-            format!(
-                "Fast DAS: deg_x={}, deg_y=2^{}, |Domain|=2^{}",
-                deg_x,
-                log_deg_y,
-                log_deg_y + 1
+        group.bench_with_input(
+            BenchmarkId::new(
+                "FastDAS",
+                format!(
+                    "deg_x={}, deg_y=2^{}, |Domain|=2^{}",
+                    deg_x,
+                    log_deg_y,
+                    log_deg_y + 1
+                ),
             ),
-            |b| {
+            &(poly, domain, table),
+            |b, (poly, domain, table)| {
                 b.iter(|| {
                     vrs::multi_evals::bivariate::multi_partial_eval_with_table::<Bn254>(
                         &poly, &domain, &table,

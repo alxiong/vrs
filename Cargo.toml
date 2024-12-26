@@ -20,7 +20,7 @@ p3-maybe-rayon = "0.2"
 thiserror = "2"
 
 [dev-dependencies]
-criterion = "0.5.1"
+criterion = { version = "0.5.1", features = ["csv"]}
 
 [features]
 default = ["parallel"]
