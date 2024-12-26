@@ -9,25 +9,16 @@ use crate::{
     bkzg::{BivariateProverParam, PartialEvalProof},
 };
 
-/// Implement multi-partial-evaluation, partially opened at y.
-/// g(X) = f(X, y) for y \in `domain`
-/// Outputs all (partial-eval proofs, partial-eval g(X))
-pub fn multi_partial_eval<E: Pairing>(
-    pk: &BivariateProverParam<E>,
+/// Same as [`multi_partial_eval()`], with precomputed table from [`multi_partial_eval_precompute()`]
+pub fn multi_partial_eval_with_table<E: Pairing>(
     poly: &DensePolynomial<E::ScalarField>,
     domain: &Radix2EvaluationDomain<E::ScalarField>,
+    table: &[Vec<E::G1Affine>],
 ) -> (
     Vec<PartialEvalProof<E>>,
     Vec<univariate::DensePolynomial<E::ScalarField>>,
 ) {
-    assert!(
-        domain.size >= poly.deg_y as u64 * 2,
-        "domain_size < degree * 2, consider double the domain_size then truncate the result"
-    );
-
     let domain_size = domain.size as usize;
-    let table = multi_partial_eval_precompute(pk, domain);
-
     // Interleaved RS encode and prepare all the partial_evals in the correct type
     let encoded = poly
         .coeffs
@@ -83,6 +74,27 @@ pub fn multi_partial_eval<E: Pairing>(
         .collect::<Vec<_>>();
 
     (proofs, partial_evals)
+}
+
+/// Implement multi-partial-evaluation, partially opened at y.
+/// g(X) = f(X, y) for y \in `domain`
+/// Outputs all (partial-eval proofs, partial-eval g(X))
+pub fn multi_partial_eval<E: Pairing>(
+    pk: &BivariateProverParam<E>,
+    poly: &DensePolynomial<E::ScalarField>,
+    domain: &Radix2EvaluationDomain<E::ScalarField>,
+) -> (
+    Vec<PartialEvalProof<E>>,
+    Vec<univariate::DensePolynomial<E::ScalarField>>,
+) {
+    assert!(
+        domain.size >= poly.deg_y as u64 * 2,
+        "domain_size < degree * 2, consider double the domain_size then truncate the result"
+    );
+
+    let table = multi_partial_eval_precompute(pk, domain);
+
+    multi_partial_eval_with_table::<E>(poly, domain, &table)
 }
 
 /// Precompute FFT([v[i] * T]_1)

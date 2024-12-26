@@ -103,6 +103,7 @@ fn bivariate(c: &mut Criterion) {
 
         let poly = bivariate::DensePolynomial::rand(deg_x as usize, deg_y as usize, rng);
 
+        let table = vrs::multi_evals::bivariate::multi_partial_eval_precompute(&pk, &domain);
         group.bench_function(
             format!(
                 "Fast: deg_x={}, deg_y=2^{}, |Domain|=2^{}",
@@ -110,7 +111,13 @@ fn bivariate(c: &mut Criterion) {
                 log_deg_y,
                 log_deg_y + 1
             ),
-            |b| b.iter(|| vrs::multi_evals::bivariate::multi_partial_eval(&pk, &poly, &domain)),
+            |b| {
+                b.iter(|| {
+                    vrs::multi_evals::bivariate::multi_partial_eval_with_table(
+                        &poly, &domain, &table,
+                    )
+                })
+            },
         );
         group.bench_function(
             format!(
