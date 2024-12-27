@@ -20,7 +20,9 @@ pub mod advz;
 pub mod bivariate;
 pub mod bkzg;
 pub mod matrix;
+pub mod merkle_tree;
 pub mod multi_evals;
+pub mod nnt;
 #[cfg(test)]
 pub mod test_utils;
 
@@ -37,6 +39,7 @@ pub trait VerifiableReedSolomon<F: FftField>: Sized {
     /// Proof for a valid share w.r.t the commitment
     type Proof: Clone + Debug;
 
+    // TODO: (alex) name max_row_dgree is little confusing, change it
     /// Construct public parameters given the degree upper bounds on X and Y dimension
     /// max_row_degree = width-1, max_col_degree = height - 1
     fn setup<R>(

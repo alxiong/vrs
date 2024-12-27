@@ -53,6 +53,13 @@ impl<F: Field> Matrix<F> {
             .collect()
     }
 
+    /// Convert to `width` number of univariate polynomials of degree `height-1`
+    pub fn to_col_uv_polys(&self) -> Vec<DensePolynomial<F>> {
+        self.par_col()
+            .map(|col| DensePolynomial::from_coefficients_slice(&col))
+            .collect()
+    }
+
     /// Returns a parallel column enumerator
     pub fn par_col_enumerate(&self) -> impl IndexedParallelIterator<Item = (usize, Vec<F>)> + '_ {
         let width = self.width;
@@ -66,6 +73,12 @@ impl<F: Field> Matrix<F> {
             (col, column)
         })
     }
+
+    /// Returns a parallel row iterator
+    pub fn par_row(&self) -> impl ParallelIterator<Item = &[F]> {
+        self.data.par_chunks(self.width)
+    }
+
     /// Returns a parallel column iterator
     pub fn par_col(&self) -> impl ParallelIterator<Item = Vec<F>> + '_ {
         let width = self.width;
