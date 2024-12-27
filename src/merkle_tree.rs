@@ -96,7 +96,7 @@ impl<F: Field> SymbolMerkleTree<F> {
 }
 
 /// A thin wrapper of Merkle Path/Proof
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize)]
 pub struct Path<F: Field> {
     inner: ark_mt::Path<SymbolMerkleTreeParams<F>>,
 }

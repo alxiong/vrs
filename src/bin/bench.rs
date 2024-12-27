@@ -4,11 +4,13 @@ use ark_bn254::{Bn254, Fr};
 use ark_poly::{EvaluationDomain, Radix2EvaluationDomain};
 use ark_serialize::{CanonicalSerialize, Compress};
 use ark_std::{
-    rand::{rngs::StdRng, SeedableRng},
+    rand::{rngs::StdRng, Rng, SeedableRng},
     UniformRand,
 };
 use jf_pcs::prelude::*;
-use vrs::{advz::AdvzVRS, bivariate, bkzg::*, matrix::Matrix, VerifiableReedSolomon};
+use vrs::{
+    advz::AdvzVRS, bivariate, bkzg::*, matrix::Matrix, nnt::kzg::KzgNntVRS, VerifiableReedSolomon,
+};
 
 use std::time::Instant;
 
@@ -91,6 +93,43 @@ fn main() {
             deg_y,
             domain_size,
             start.elapsed().as_millis(),
+            shares[0].proof.serialized_size(Compress::No) + cm.serialized_size(Compress::No)
+        );
+    }
+
+    println!("\nKZG-NNT");
+    println!("deg_x, deg_y, domain_size, commit(ms), verify(ms), communication(byte)");
+
+    let pp = KzgNntVRS::<Bn254>::setup(max_deg_y as usize, max_deg_x as usize, rng).unwrap();
+    for log_deg_y in 10..=16 {
+        let deg_x = max_deg_x as usize;
+        let deg_y = 2usize.pow(log_deg_y);
+        let domain_size = 2 * deg_y;
+
+        let domain = Radix2EvaluationDomain::new(domain_size).unwrap();
+        let (pk, vk) = KzgNntVRS::preprocess(&pp, deg_y, deg_x, &domain).unwrap();
+
+        let data = (0..(deg_y + 1) * (deg_x + 1))
+            .map(|_| Fr::rand(rng))
+            .collect();
+        let data = Matrix::new(data, deg_y + 1, deg_x + 1).unwrap();
+
+        let start = Instant::now();
+        let (cm, shares) = KzgNntVRS::compute_shares(&pk, &data).unwrap();
+        let commit_time = start.elapsed().as_millis();
+
+        let start = Instant::now();
+        let idx = rng.gen_range(0..domain_size);
+        KzgNntVRS::verify_share(&vk, &cm, idx, &shares[idx]).unwrap();
+        let verify_time = start.elapsed().as_millis();
+
+        println!(
+            "{}, {}, {}, {}, {}, {}",
+            deg_x,
+            deg_y,
+            domain_size,
+            commit_time,
+            verify_time,
             shares[0].proof.serialized_size(Compress::No) + cm.serialized_size(Compress::No)
         );
     }
