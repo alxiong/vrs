@@ -3,9 +3,12 @@
 use ark_bn254::{Bn254, Fr};
 use ark_poly::{EvaluationDomain, Radix2EvaluationDomain};
 use ark_serialize::{CanonicalSerialize, Compress};
-use ark_std::rand::{rngs::StdRng, SeedableRng};
+use ark_std::{
+    rand::{rngs::StdRng, SeedableRng},
+    UniformRand,
+};
 use jf_pcs::prelude::*;
-use vrs::{bivariate, bkzg::*};
+use vrs::{advz::AdvzVRS, bivariate, bkzg::*, matrix::Matrix, VerifiableReedSolomon};
 
 use std::time::Instant;
 
@@ -32,7 +35,7 @@ fn main() {
     println!(" takes {} ms", start.elapsed().as_millis());
 
     println!("MultiPartialEval/Fast");
-    println!("deg_x,deg_y,domain_size,prover(ms),communication(byte)");
+    println!("deg_x, deg_y, domain_size, commit(ms), prover(ms), communication(byte)");
     for log_deg_y in 10..=16 {
         let deg_x = max_deg_x;
         let deg_y = 2u32.pow(log_deg_y);
@@ -41,7 +44,10 @@ fn main() {
         let domain = Radix2EvaluationDomain::<Fr>::new(2 * deg_y as usize).unwrap();
 
         let poly = bivariate::DensePolynomial::<Fr>::rand(deg_x as usize, deg_y as usize, rng);
+
+        let start = Instant::now();
         let cm = BivariateKzgPCS::commit(&pk, &poly).unwrap();
+        let commit_time = start.elapsed().as_millis();
 
         let table = vrs::multi_evals::bivariate::multi_partial_eval_precompute(&pk, &domain);
 
@@ -50,12 +56,42 @@ fn main() {
             Bn254,
         >(&poly, &domain, &table);
         println!(
-            "{},{},{},{},{}",
+            "{}, {}, {}, {}, {}, {}",
             deg_x,
             deg_y,
             2 * deg_y,
+            commit_time,
             start.elapsed().as_millis(),
             proofs[0].serialized_size(Compress::No) + cm.serialized_size(Compress::No)
+        );
+    }
+
+    let pp = AdvzVRS::<Bn254>::setup(max_deg_y as usize, max_deg_x as usize, rng).unwrap();
+
+    println!("\nMultiEval/Advz");
+    println!("deg_x, deg_y, domain_size, commit+prover(ms), communication(byte)");
+    for log_deg_y in 10..=16 {
+        let deg_x = max_deg_x as usize;
+        let deg_y = 2usize.pow(log_deg_y);
+        let domain_size = 2 * deg_y;
+
+        let domain = Radix2EvaluationDomain::new(domain_size).unwrap();
+        let (pk, _vk) = AdvzVRS::preprocess(&pp, deg_y, deg_x, &domain).unwrap();
+
+        let data = (0..(deg_y + 1) * (deg_x + 1))
+            .map(|_| Fr::rand(rng))
+            .collect();
+        let data = Matrix::new(data, deg_y + 1, deg_x + 1).unwrap();
+
+        let start = Instant::now();
+        let (cm, shares) = AdvzVRS::compute_shares(&pk, &data).unwrap();
+        println!(
+            "{}, {}, {}, {}, {}",
+            deg_x,
+            deg_y,
+            domain_size,
+            start.elapsed().as_millis(),
+            shares[0].proof.serialized_size(Compress::No) + cm.serialized_size(Compress::No)
         );
     }
 }
