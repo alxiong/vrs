@@ -46,22 +46,18 @@ fn univariate(c: &mut Criterion) {
     group.sample_size(10);
 
     let rng = &mut test_rng();
-    let max_degree = 2usize.pow(15);
+    let max_degree = 2usize.pow(20);
     let pp = UnivariateUniversalParams::<Bn254>::gen_srs_for_testing(rng, max_degree).unwrap();
 
-    let degree = 2usize.pow(10);
-    let (pk, _vk) = UnivariateUniversalParams::trim(&pp, degree).unwrap();
+    for log_deg in 10..=20 {
+        let domain = Radix2EvaluationDomain::new(2usize.pow(log_deg + 1)).unwrap();
+        let poly = DensePolynomial::rand(1 << log_deg, rng);
+        let (pk, _vk) = UnivariateUniversalParams::trim(&pp, 1 << log_deg).unwrap();
 
-    for log_size in [12, 15, 20] {
-        let domain = Radix2EvaluationDomain::new(2usize.pow(log_size)).unwrap();
-        let poly = DensePolynomial::rand(degree, rng);
-
-        group.bench_function(format!("Fast: Deg=2^10, |Domain|=2^{}", log_size), |b| {
-            b.iter(|| vrs::multi_evals::univariate::multi_eval(&pk, &poly, &domain))
-        });
-        group.bench_function(format!("Naive: Deg=2^10, |Domain|=2^{}", log_size), |b| {
-            b.iter(|| uv_multi_eval_naive(&pk, &poly, &domain))
-        });
+        group.bench_function(
+            format!("Fast: Deg=2^{}, |Domain|=2^{}", log_deg, log_deg + 1),
+            |b| b.iter(|| vrs::multi_evals::univariate::multi_eval(&pk, &poly, &domain)),
+        );
     }
 
     group.finish();
@@ -155,7 +151,7 @@ fn bivariate_vid(c: &mut Criterion) {
         let (pk, _vk) = BivariateKzgPCS::trim(&pp, supported_degree as usize, None).unwrap();
         let domain = Radix2EvaluationDomain::<Fr>::new(2 * deg_y as usize).unwrap();
 
-        let poly = bivariate::DensePolynomial::rand(deg_x as usize, deg_y as usize, rng);
+        let poly = bivariate::DensePolynomial::<Fr>::rand(deg_x as usize, deg_y as usize, rng);
 
         let table = vrs::multi_evals::bivariate::multi_partial_eval_precompute(&pk, &domain);
         group.bench_function(
@@ -167,7 +163,7 @@ fn bivariate_vid(c: &mut Criterion) {
             ),
             |b| {
                 b.iter(|| {
-                    vrs::multi_evals::bivariate::multi_partial_eval_with_table(
+                    vrs::multi_evals::bivariate::multi_partial_eval_with_table::<Bn254>(
                         &poly, &domain, &table,
                     )
                 })
@@ -186,7 +182,7 @@ fn bivariate_vid(c: &mut Criterion) {
     group.finish();
 }
 
-// criterion_group!(benches, univariate, bivariate);
-criterion_group!(benches, bivariate, bivariate_vid);
+criterion_group!(benches, univariate);
+// criterion_group!(benches, bivariate, bivariate_vid);
 
 criterion_main!(benches);
