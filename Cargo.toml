@@ -10,6 +10,7 @@ ark-bn254 = "^0.4.0"
 ark-crypto-primitives = { version = "^0.4.0", features = ["merkle_tree"] }
 ark-ec = "^0.4.2"
 ark-ff = "^0.4.2"
+csv = "1.3.0"
 ark-poly = "^0.4.2"
 ark-serialize = "^0.4.2"
 ark-std = "^0.4.0"

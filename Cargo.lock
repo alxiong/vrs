@@ -1136,6 +1136,7 @@ dependencies = [
  "ark-serialize",
  "ark-std",
  "criterion",
+ "csv",
  "derivative",
  "itertools 0.13.0",
  "jf-pcs",

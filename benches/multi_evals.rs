@@ -3,12 +3,15 @@
 #[macro_use]
 extern crate criterion;
 
+use std::time::Instant;
+
 use ark_bn254::{Bn254, Fr};
 use ark_ec::pairing::Pairing;
 use ark_poly::{
     univariate::DensePolynomial, DenseUVPolynomial, EvaluationDomain, Radix2EvaluationDomain,
 };
 use ark_std::rand::{rngs::StdRng, SeedableRng};
+use csv::Writer;
 use jf_pcs::prelude::*;
 use p3_maybe_rayon::prelude::*;
 use vrs::{bivariate, bkzg::*};
@@ -48,16 +51,20 @@ fn univariate(c: &mut Criterion) {
     let rng = &mut test_rng();
     let max_degree = 2usize.pow(20);
     let pp = UnivariateUniversalParams::<Bn254>::gen_srs_for_testing(rng, max_degree).unwrap();
-
-    for log_deg in 10..=20 {
+    let mut wtr = Writer::from_path("multiopen.csv").unwrap();
+    wtr.write_record(&["log_blob_size", "prover_time"]).unwrap();
+    for log_deg in 10..20 {
         let domain = Radix2EvaluationDomain::new(2usize.pow(log_deg + 1)).unwrap();
         let poly = DensePolynomial::rand(1 << log_deg, rng);
         let (pk, _vk) = UnivariateUniversalParams::trim(&pp, 1 << log_deg).unwrap();
 
-        group.bench_function(
-            format!("Fast: Deg=2^{}, |Domain|=2^{}", log_deg, log_deg + 1),
-            |b| b.iter(|| vrs::multi_evals::univariate::multi_eval(&pk, &poly, &domain)),
-        );
+        let now = Instant::now();
+        for _ in 0..10 {
+            let _ = vrs::multi_evals::univariate::multi_eval(&pk, &poly, &domain);
+        }
+        let prover_time = now.elapsed().as_micros() as usize / 10;
+        wtr.write_record(&[log_deg as usize, prover_time].map(|x| x.to_string()))
+            .unwrap();
     }
 
     group.finish();
