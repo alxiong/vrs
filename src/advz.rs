@@ -101,11 +101,7 @@ where
 
         // 1. encode kxL into nxL matrix (row-wise FFT)
         let encode_time = start_timer!(|| "encode data");
-        let encoded: Vec<F> = row_polys
-            .par_iter()
-            .flat_map(|poly| pk.domain.fft(poly))
-            .collect();
-        let encoded = Matrix::new(encoded, pk.domain.size as usize, pk.height)?;
+        let encoded = Self::interleaved_rs_encode(data, &pk.domain)?;
         end_timer!(encode_time);
 
         // 2. construct a merkle tree from the encoded matrix, each leaf is a L-size vector

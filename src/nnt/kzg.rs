@@ -67,11 +67,10 @@ where
     ) -> Result<(Self::Commitment, Vec<VrsShare<F, Self>>), VrsError> {
         // 1. encode Lxk into Lxn matrix (row-wise FFT)
         let encode_time = start_timer!(|| "encode data");
-        let encoded: Vec<F> = data.par_row().flat_map(|row| pk.1.fft(row)).collect();
+        let encoded = Self::interleaved_rs_encode(data, &pk.1)?;
         end_timer!(encode_time);
 
         // put each col to a share
-        let encoded = Matrix::new(encoded, pk.1.size as usize, data.height())?;
         let shares = encoded
             .par_col()
             .map(|data| VrsShare { data, proof: () })

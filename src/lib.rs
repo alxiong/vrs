@@ -8,17 +8,19 @@
 #![deny(unsafe_code)]
 
 use ark_ff::FftField;
-use ark_poly::Radix2EvaluationDomain;
+use ark_poly::{EvaluationDomain, Radix2EvaluationDomain};
 use ark_std::{
     fmt::Debug,
     rand::{CryptoRng, RngCore},
 };
 use matrix::Matrix;
+use p3_maybe_rayon::prelude::*;
 use thiserror::Error;
 
 pub mod advz;
 pub mod bivariate;
 pub mod bkzg;
+pub mod gxz;
 pub mod matrix;
 pub mod merkle_tree;
 pub mod multi_evals;
@@ -77,6 +79,20 @@ pub trait VerifiableReedSolomon<F: FftField>: Sized {
         idx: usize,
         share: &VrsShare<F, Self>,
     ) -> Result<bool, VrsError>;
+
+    /// Row-wise (k,n)-RS encode the data matrix: (F^L)^k -> (F^L)^n
+    /// `domain.size = n` and `data.width() = k`
+    /// Returns the encoded matrix of size (F^L)^n
+    #[inline]
+    fn interleaved_rs_encode(
+        data: &Matrix<F>,
+        domain: &Radix2EvaluationDomain<F>,
+    ) -> Result<Matrix<F>, VrsError> {
+        // flatten encoded data
+        let encoded: Vec<F> = data.par_row().flat_map(|row| domain.fft(row)).collect();
+        let encoded_matrix = Matrix::new(encoded, domain.size as usize, data.height())?;
+        Ok(encoded_matrix)
+    }
 }
 
 /// A share for a node/replica in VerifiableRS scheme
