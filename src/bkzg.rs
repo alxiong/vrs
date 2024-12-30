@@ -76,18 +76,32 @@ impl<E: Pairing> PolynomialCommitmentScheme for BivariateKzgPCS<E> {
         poly: &DensePolynomial<E::ScalarField>,
     ) -> Result<Self::Commitment, PCSError> {
         let pk = pk.borrow();
-        let cm = pk
+        let bases = pk
             .powers_of_g
             .par_iter()
-            .zip(poly.coeffs.par_iter())
-            .map(|(bases, coeffs)| {
-                <E::G1 as VariableBaseMSM>::msm(&bases[..=poly.deg_y], coeffs)
-                    .expect("msm during commit fail")
-            })
-            .reduce(
-                || E::G1Affine::zero().into_group(),
-                |acc, row_res| acc + row_res,
-            );
+            .take(poly.coeffs.len())
+            .flat_map(|bases| bases[..=poly.deg_y].par_iter().cloned())
+            .collect::<Vec<_>>();
+        let scalars = poly
+            .coeffs
+            .par_iter()
+            .flat_map(|coeffs| coeffs.par_iter().cloned())
+            .collect::<Vec<_>>();
+        let cm = <E::G1 as VariableBaseMSM>::msm(&bases, &scalars).unwrap();
+
+        // NOTE: slower but more memory efficient, compute more smaller MSM
+        // let cm = pk
+        //     .powers_of_g
+        //     .par_iter()
+        //     .zip(poly.coeffs.par_iter())
+        //     .map(|(bases, coeffs)| {
+        //         <E::G1 as VariableBaseMSM>::msm(&bases[..=poly.deg_y], coeffs)
+        //             .expect("msm during commit fail")
+        //     })
+        //     .reduce(
+        //         || E::G1Affine::zero().into_group(),
+        //         |acc, row_res| acc + row_res,
+        //     );
         Ok(cm.into_affine())
     }
 
