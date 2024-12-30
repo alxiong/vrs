@@ -106,6 +106,7 @@ where
 
         // 2. construct a merkle tree from the encoded matrix, each leaf is a L-size vector
         // TODO: directly pass in an iterator to MerkleTree constructor instead of collect it first
+        let agg_time = start_timer!(|| "aggregate poly");
         let leaves = encoded.par_col().collect::<Vec<_>>();
         let mt = SymbolMerkleTree::<F>::new(leaves);
 
@@ -120,6 +121,7 @@ where
                 r_i *= r;
                 acc + poly * r_i
             });
+        end_timer!(agg_time);
 
         // 4 commit each row using pcs
         let commit_time = start_timer!(|| "commit row_poly");
