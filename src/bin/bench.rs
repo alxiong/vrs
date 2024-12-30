@@ -26,8 +26,8 @@ pub fn test_rng() -> StdRng {
 
 fn main() {
     let rng = &mut test_rng();
-    let max_deg_x = 64;
-    let max_deg_y = 2u32.pow(16);
+    let max_deg_x = 2u32.pow(13);
+    let max_deg_y = 256;
     let hacky_supported_degree = combine_u32(max_deg_x, max_deg_y);
 
     print!("TrustedSetup");
@@ -38,9 +38,9 @@ fn main() {
 
     println!("MultiPartialEval/Fast");
     println!("deg_x, deg_y, domain_size, commit(ms), prover(ms), communication(byte)");
-    for log_deg_y in 10..=16 {
-        let deg_x = max_deg_x;
-        let deg_y = 2u32.pow(log_deg_y);
+    for log_deg_x in 8..=13 {
+        let deg_x = 2u32.pow(log_deg_x);
+        let deg_y = max_deg_y;
         let supported_degree = combine_u32(deg_x, deg_y);
         let (pk, _vk) = BivariateKzgPCS::trim(&pp, supported_degree as usize, None).unwrap();
         let domain = Radix2EvaluationDomain::<Fr>::new(2 * deg_y as usize).unwrap();
@@ -72,9 +72,9 @@ fn main() {
 
     println!("\nMultiEval/Advz");
     println!("deg_x, deg_y, domain_size, commit+prover(ms), communication(byte)");
-    for log_deg_y in 10..=16 {
-        let deg_x = max_deg_x as usize;
-        let deg_y = 2usize.pow(log_deg_y);
+    for log_deg_x in 8..=13 {
+        let deg_x = 2usize.pow(log_deg_x);
+        let deg_y = max_deg_y as usize;
         let domain_size = 2 * deg_y;
 
         let domain = Radix2EvaluationDomain::new(domain_size).unwrap();
@@ -101,9 +101,9 @@ fn main() {
     println!("deg_x, deg_y, domain_size, commit(ms), verify(ms), communication(byte)");
 
     let pp = KzgNntVRS::<Bn254>::setup(max_deg_y as usize, max_deg_x as usize, rng).unwrap();
-    for log_deg_y in 10..=16 {
-        let deg_x = max_deg_x as usize;
-        let deg_y = 2usize.pow(log_deg_y);
+    for log_deg_x in 8..=13 {
+        let deg_x = 2usize.pow(log_deg_x);
+        let deg_y = max_deg_y as usize;
         let domain_size = 2 * deg_y;
 
         let domain = Radix2EvaluationDomain::new(domain_size).unwrap();
