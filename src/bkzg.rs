@@ -7,6 +7,7 @@ use ark_poly::{univariate, DenseUVPolynomial, Polynomial};
 use ark_serialize::*;
 use ark_std::{
     borrow::Borrow,
+    env,
     marker::PhantomData,
     rand::{CryptoRng, RngCore},
     UniformRand,
@@ -76,32 +77,46 @@ impl<E: Pairing> PolynomialCommitmentScheme for BivariateKzgPCS<E> {
         poly: &DensePolynomial<E::ScalarField>,
     ) -> Result<Self::Commitment, PCSError> {
         let pk = pk.borrow();
-        let bases = pk
-            .powers_of_g
-            .par_iter()
-            .take(poly.coeffs.len())
-            .flat_map(|bases| bases[..=poly.deg_y].par_iter().cloned())
-            .collect::<Vec<_>>();
-        let scalars = poly
-            .coeffs
-            .par_iter()
-            .flat_map(|coeffs| coeffs.par_iter().cloned())
-            .collect::<Vec<_>>();
-        let cm = <E::G1 as VariableBaseMSM>::msm(&bases, &scalars).unwrap();
 
-        // NOTE: slower but more memory efficient, compute more smaller MSM
-        // let cm = pk
-        //     .powers_of_g
-        //     .par_iter()
-        //     .zip(poly.coeffs.par_iter())
-        //     .map(|(bases, coeffs)| {
-        //         <E::G1 as VariableBaseMSM>::msm(&bases[..=poly.deg_y], coeffs)
-        //             .expect("msm during commit fail")
-        //     })
-        //     .reduce(
-        //         || E::G1Affine::zero().into_group(),
-        //         |acc, row_res| acc + row_res,
-        //     );
+        // heuristically, MSM complexity is n/logn, with 1 threads:
+        // Lk/log(Lk) < L*(k/logk), thus lower amortized cost to compute a larger msm
+        // with t threads:
+        // when t > log(Lk)/log(k), it is faster to compute smaller MSM in parallel
+        // where L is deg_x+1, k is deg_y+1, for simplicity we ignore the +1, it's heuristic anyway
+        let cm = match env::var("RAYON_NUM_THREADS") {
+            Ok(t)
+                if (t.parse::<usize>().unwrap() as f32)
+                    < (poly.degree() as f32).log2() / (poly.deg_y as f32).log2() =>
+            {
+                let bases = pk
+                    .powers_of_g
+                    .par_iter()
+                    .take(poly.coeffs.len())
+                    .flat_map(|bases| bases[..=poly.deg_y].par_iter().cloned())
+                    .collect::<Vec<_>>();
+                let scalars = poly
+                    .coeffs
+                    .par_iter()
+                    .flat_map(|coeffs| coeffs.par_iter().cloned())
+                    .collect::<Vec<_>>();
+                <E::G1 as VariableBaseMSM>::msm(&bases, &scalars).unwrap()
+            },
+            _ => {
+                // slower in single-thread: more smaller MSM instead of a bigger MSM with lower amortized cost
+                // but potentially faster under multi-threading, also more memory efficient
+                pk.powers_of_g
+                    .par_iter()
+                    .zip(poly.coeffs.par_iter())
+                    .map(|(bases, coeffs)| {
+                        <E::G1 as VariableBaseMSM>::msm(&bases[..=poly.deg_y], coeffs)
+                            .expect("msm during commit fail")
+                    })
+                    .reduce(
+                        || E::G1Affine::zero().into_group(),
+                        |acc, row_res| acc + row_res,
+                    )
+            },
+        };
         Ok(cm.into_affine())
     }
 
