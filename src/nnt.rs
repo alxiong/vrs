@@ -2,3 +2,4 @@
 //! which relies on linear Vector Commitment schemes, we instantiate with KZG and Pedersen
 
 pub mod kzg;
+pub mod pedersen;

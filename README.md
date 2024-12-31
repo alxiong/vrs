@@ -23,7 +23,7 @@ _note: we only support `arkworks` backends for now, `zkcrypto` and `plonky3` sup
   - trusted: leveraging bKZG and fast `MultiPartialEval`
 - `advz`: VRS scheme for VID using only univariate multi-evals.
 - [] `frida`: VRS scheme in [FRIDA](https://eprint.iacr.org/2024/248) for DAS
-- [] `nnt`: VRS scheme in [NNT'22](https://arxiv.org/pdf/2111.12323) for VID
+- `nnt`: VRS scheme in [NNT'22](https://arxiv.org/pdf/2111.12323) for VID, instantiated with KZG and Pedersen.
 
 ## Benchmarks
 
