@@ -699,8 +699,7 @@ dependencies = [
 [[package]]
 name = "nimue"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0dc7d3b2b7bd112c0cecf7d6f4f16a174ee7a98e27615b1d08256d0176588f2"
+source = "git+https://github.com/alxiong/nimue?branch=v0.1.2#95357b26899f37089a3382fe963d4e9d35b6f40c"
 dependencies = [
  "ark-ec",
  "ark-ff",

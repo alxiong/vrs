@@ -13,6 +13,7 @@ use crate::{
 };
 
 /// Parameters for FRI
+#[derive(Debug, Clone)]
 pub struct FriConfig {
     /// blowup factor for linear code
     pub log_blowup: usize,
@@ -21,14 +22,20 @@ pub struct FriConfig {
     // TODO: allow more flexible per-step reduction
     // // reduction factor: a_i = |D_i-1| / |D_i| >= 2
     // pub red_factors: Vec<usize>,
-    // TODO: add proof-of-work for grinding
+    /// Proof-of-work for grinding
+    pub pow_bits: usize,
     /// IOP transcript io pattern
     pub io: IOPattern,
 }
 
 impl FriConfig {
     /// init a config
-    pub fn new<F>(log_blowup: usize, num_queries: usize, init_domain_size: usize) -> Self
+    pub fn new<F>(
+        log_blowup: usize,
+        num_queries: usize,
+        pow_bits: usize,
+        init_domain_size: usize,
+    ) -> Self
     where
         F: Field,
     {
@@ -39,6 +46,9 @@ impl FriConfig {
             io = FieldIOPattern::<F>::challenge_scalars(io, 1, &format!("beta_{}", round));
         }
         io = FieldIOPattern::<F>::add_scalars(io, 1, "final_poly");
+        io = io
+            .absorb(8, "pow_wit") // u64 = [u8; 8]
+            .squeeze((pow_bits + 7) / 8, "grind_res");
         for query in 0..num_queries {
             io = io.challenge_bytes(usize::BITS as usize / 8, &format!("query_{}", query));
         }
@@ -46,6 +56,7 @@ impl FriConfig {
         Self {
             log_blowup,
             num_queries,
+            pow_bits,
             io,
         }
     }
@@ -60,7 +71,7 @@ impl FriConfig {
 #[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize)]
 pub struct FriProof<F: Field> {
     /// Fiat-Shamir transcript, containing only prover messages
-    /// containing merkle_root from all rounds and the final_poly (constant poly)
+    /// containing merkle_root from all rounds, the final_poly (constant poly), and proof of work witness
     pub transcript: Vec<u8>,
     /// Query proofs for all queries
     pub query_proofs: Vec<QueryProof<F>>,
@@ -87,6 +98,47 @@ impl<F: Field> QueryProof<F> {
         assert!(!self.openings.is_empty());
         self.openings[0].1.capacity() * 2
     }
+}
+
+/// Prover's grinding to solve proof-of-work with difficulty bits
+/// and append the solution to the transcript when found.
+fn pow_grind(merlin: &mut Merlin, pow_bits: usize) {
+    assert!((pow_bits as u32) < u64::BITS);
+    let pow_witness = (0..u64::MAX)
+        .into_par_iter()
+        .find_any(|witness| {
+            let mut forked_merlin = merlin.clone();
+            forked_merlin.add_bytes(&witness.to_le_bytes()).unwrap();
+            let mut grinding_result = vec![0u8; (pow_bits + 7) / 8];
+            forked_merlin
+                .fill_challenge_bytes(&mut grinding_result)
+                .unwrap();
+
+            // succeed if the first `pow_bits` bits are all zero
+            pow_verify(&grinding_result, pow_bits)
+        })
+        .expect("failed to find witness");
+
+    // append actual pow solution/witness
+    merlin.add_bytes(&pow_witness.to_le_bytes()).unwrap();
+    let mut grinding_result = vec![0u8; (pow_bits + 7) / 8];
+    merlin.fill_challenge_bytes(&mut grinding_result).unwrap();
+}
+
+/// Verify proof-of-work result, the first `pow_bits` are zeros
+fn pow_verify(bytes: &[u8], pow_bits: usize) -> bool {
+    bytes
+        .iter()
+        .take((pow_bits + 7) / 8)
+        .enumerate()
+        .all(|(i, &b)| {
+            if (i + 1) * 8 > pow_bits {
+                // Check the last, partially-filled byte
+                (b >> (8 - pow_bits % 8)) == 0
+            } else {
+                b == 0
+            }
+        })
 }
 
 /// Proving low-degree of a polynomial given its evaluation on D
@@ -164,6 +216,9 @@ where
     assert!(folded.par_iter().all(|f| f == &final_poly));
     merlin.add_scalars(&[final_poly]).unwrap();
 
+    // Perform Proof-of-work grinding
+    pow_grind(&mut merlin, config.pow_bits);
+
     // Query Phase
     // randomly sampled s_0 for each query, must be sequential squeezing
     let s_0_indices: Vec<usize> = (0..config.num_queries)
@@ -229,6 +284,14 @@ where
     }
     let [final_poly]: [F; 1] = arthur.next_scalars().unwrap();
 
+    // verify proof-of-work grind
+    let _pow_witness = arthur.next_bytes::<8>().unwrap();
+    let mut grinding_result = vec![0u8; (config.pow_bits + 7) / 8];
+    arthur.fill_challenge_bytes(&mut grinding_result).unwrap();
+    if !pow_verify(&grinding_result, config.pow_bits) {
+        return false;
+    }
+
     let s_0_indices: Vec<usize> = (0..config.num_queries)
         .map(|_| usize::from_le_bytes(arthur.challenge_bytes().unwrap()) % domain_0_size)
         .collect();
@@ -282,6 +345,7 @@ mod tests {
         let rng = &mut test_rng();
         let log_blowup = 1;
         let num_queries = 5;
+        let pow_bits = 3;
         let init_domain_size = 64;
         let domain = Radix2EvaluationDomain::new(init_domain_size).unwrap();
         let coeffs = (0..init_domain_size / (1 << log_blowup))
@@ -289,7 +353,7 @@ mod tests {
             .collect::<Vec<_>>();
         let evals = domain.fft(&coeffs);
 
-        let config = FriConfig::new::<Fr>(log_blowup, num_queries, init_domain_size);
+        let config = FriConfig::new::<Fr>(log_blowup, num_queries, pow_bits, init_domain_size);
         let fri_proof = super::prove(&config, Evaluations::from_vec_and_domain(evals, domain));
         assert!(super::verify(&config, &fri_proof));
 
@@ -304,6 +368,7 @@ mod tests {
         let rng = &mut test_rng();
         let log_blowup = 1;
         let num_queries = 5;
+        let pow_bits = 2;
         let init_domain_size = 64;
         // these don't match the evaluation of a polynomial of degree `init_domain_size / (1 << log_blowup)`
         let bad_evals = (0..init_domain_size)
@@ -311,9 +376,30 @@ mod tests {
             .collect::<Vec<_>>();
         let domain = Radix2EvaluationDomain::new(init_domain_size).unwrap();
 
-        let config = FriConfig::new::<Fr>(log_blowup, num_queries, init_domain_size);
+        let config = FriConfig::new::<Fr>(log_blowup, num_queries, pow_bits, init_domain_size);
         // this will fail since the final folded constant poly shouldn't match
         super::prove(&config, Evaluations::from_vec_and_domain(bad_evals, domain));
+    }
+
+    #[test]
+    fn test_pow_grind() {
+        assert!(pow_verify(&[0, 0], 3));
+        assert!(!pow_verify(&[128], 3));
+        assert!(pow_verify(&[0, 64], 9));
+
+        for pow_bits in 2..6 {
+            let io = IOPattern::<DefaultHash>::new("protocol")
+                .absorb(u64::BITS as usize / 8, "pow_witness")
+                .squeeze((pow_bits + 7) / 8, "grind_result");
+            let mut merlin = io.to_merlin();
+            pow_grind(&mut merlin, pow_bits);
+
+            let mut arthur = io.to_arthur(&merlin.transcript());
+            let _witness = arthur.next_bytes::<8>().unwrap();
+            let mut grinding_result = vec![0u8; (pow_bits + 7) / 8];
+            arthur.fill_challenge_bytes(&mut grinding_result).unwrap();
+            assert!(pow_verify(&grinding_result, pow_bits));
+        }
     }
 
     #[ignore]
