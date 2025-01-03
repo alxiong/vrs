@@ -63,6 +63,11 @@ impl<F: Field> SymbolMerkleTree<F> {
         Self { inner }
     }
 
+    /// Convenience method to accept a slice of slices directly.
+    pub fn from_slice<L: Borrow<[F]>>(leaves: &[L]) -> Self {
+        Self::new(leaves.iter().map(|x| x.borrow()))
+    }
+
     /// Create an empty merkle tree such that all leaves are zero-filled.
     pub fn blank(height: usize) -> Self {
         let inner =
@@ -73,6 +78,11 @@ impl<F: Field> SymbolMerkleTree<F> {
     /// Returns the root of the Merkle tree.
     pub fn root(&self) -> Vec<u8> {
         self.inner.root()
+    }
+
+    /// Returns the byte size of the root value
+    pub const fn root_byte_size() -> usize {
+        32
     }
 
     /// Returns the root but as a field element
@@ -87,6 +97,11 @@ impl<F: Field> SymbolMerkleTree<F> {
         self.inner.height()
     }
 
+    /// Returns the capacity of the tree
+    pub fn capacity(&self) -> usize {
+        2usize.pow(self.height() as u32 - 1)
+    }
+
     /// Returns the authentication path from leaf at `index` to root.
     pub fn generate_proof(&self, index: usize) -> Path<F> {
         Path {
@@ -96,13 +111,59 @@ impl<F: Field> SymbolMerkleTree<F> {
 }
 
 /// A thin wrapper of Merkle Path/Proof
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize)]
 pub struct Path<F: Field> {
     inner: ark_mt::Path<SymbolMerkleTreeParams<F>>,
 }
 
 impl<F: Field> Path<F> {
+    /// Verify the merkle path
     pub fn verify<L: Borrow<[F]>>(&self, root_hash: &Vec<u8>, leaf: L) -> bool {
         self.inner.verify(&(), &(), root_hash, leaf).unwrap()
+    }
+    /// returns the leaf index of this merkle proof is proving
+    pub fn index(&self) -> usize {
+        self.inner.leaf_index
+    }
+    /// return original tree height
+    pub fn height(&self) -> usize {
+        // auth_path didn't include the root nor the leaf level
+        self.inner.auth_path.len() + 2
+    }
+    /// returns the capacity of the original merkle tree
+    pub fn capacity(&self) -> usize {
+        2usize.pow(self.height() as u32 - 1)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test_utils::test_rng;
+
+    use super::*;
+    use ark_bn254::Fr;
+    use ark_std::UniformRand;
+
+    // check our wrapper code didn't violate merkle tree correctness
+    #[test]
+    fn test_mt_wrapper_sanity() {
+        let rng = &mut test_rng();
+
+        for log_size in 1..10usize {
+            let size = 2usize.pow(log_size as u32);
+            let leaves: Vec<_> = (0..size).map(|_| [Fr::rand(rng)]).collect();
+            let mt = SymbolMerkleTree::new(leaves.clone());
+            let root = mt.root();
+
+            assert_eq!(mt.height(), log_size + 1);
+            assert_eq!(mt.capacity(), size);
+            for _ in 0..10 {
+                let idx = rng.gen_range(0..size) as usize;
+                let proof = mt.generate_proof(idx);
+                assert!(proof.verify(&root, leaves[idx].as_slice()));
+                assert_eq!(mt.height(), proof.height());
+                assert_eq!(proof.capacity(), size);
+            }
+        }
     }
 }
