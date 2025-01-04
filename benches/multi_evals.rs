@@ -11,7 +11,7 @@ use ark_poly::{
 use ark_std::rand::{rngs::StdRng, SeedableRng};
 use jf_pcs::prelude::*;
 use p3_maybe_rayon::prelude::*;
-use vrs::{bivariate, bkzg::*};
+use vrs::{bivariate, pcs::bkzg::*};
 
 use criterion::Criterion;
 
@@ -113,7 +113,7 @@ fn bivariate(c: &mut Criterion) {
             ),
             |b| {
                 b.iter(|| {
-                    vrs::multi_evals::bivariate::multi_partial_eval_with_table(
+                    vrs::multi_evals::bivariate::multi_partial_eval_with_table::<Bn254>(
                         &poly, &domain, &table,
                     )
                 })
@@ -132,7 +132,7 @@ fn bivariate(c: &mut Criterion) {
     group.finish();
 }
 
-// criterion_group!(benches, univariate, bivariate);
-criterion_group!(benches, bivariate);
+criterion_group!(benches, univariate, bivariate);
+// criterion_group!(benches, bivariate);
 
 criterion_main!(benches);

@@ -25,7 +25,7 @@ pub struct FriConfig {
     /// Proof-of-work for grinding
     pub pow_bits: usize,
     /// IOP transcript io pattern
-    pub io: IOPattern,
+    io: IOPattern,
 }
 
 impl FriConfig {

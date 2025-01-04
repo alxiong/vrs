@@ -19,13 +19,13 @@ use thiserror::Error;
 
 pub mod advz;
 pub mod bivariate;
-pub mod bkzg;
 pub mod gxz;
 pub mod iopp;
 pub mod matrix;
 pub mod merkle_tree;
 pub mod multi_evals;
 pub mod nnt;
+pub mod pcs;
 #[cfg(test)]
 pub mod test_utils;
 
