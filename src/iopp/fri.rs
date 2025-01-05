@@ -80,7 +80,7 @@ impl FriConfig {
         F: Field,
     {
         let mut io = IOPattern::<DefaultHash>::new("FRI");
-        let init_domain_size = msg_len * (1 << log_blowup);
+        let init_domain_size = (msg_len * (1 << log_blowup)).next_power_of_two();
         let num_rounds = init_domain_size.ilog2() as usize - log_blowup;
         for round in 0..num_rounds {
             io = io.absorb(32, &format!("root_{}", round));
@@ -357,7 +357,7 @@ where
 
                 idx %= tree_size;
                 tree_size /= 2;
-                if mt_proof.index() != idx || !mt_proof.verify(root, leaf.clone()) {
+                if !mt_proof.verify(root, idx, leaf.clone()) {
                     return false;
                 }
 

@@ -175,7 +175,7 @@ where
         let row_poly_cms: Vec<_> = comm.1.par_iter().map(|x| x.0).collect();
 
         // 1. verify merkle proof
-        if !path.verify(root, share.data.as_slice()) {
+        if !path.verify(root, idx, share.data.as_slice()) {
             return Ok(false);
         }
 

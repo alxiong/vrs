@@ -118,8 +118,8 @@ pub struct Path<F: Field> {
 
 impl<F: Field> Path<F> {
     /// Verify the merkle path
-    pub fn verify<L: Borrow<[F]>>(&self, root_hash: &Vec<u8>, leaf: L) -> bool {
-        self.inner.verify(&(), &(), root_hash, leaf).unwrap()
+    pub fn verify<L: Borrow<[F]>>(&self, root: &Vec<u8>, pos: usize, leaf: L) -> bool {
+        self.inner.verify(&(), &(), root, leaf).unwrap() && pos == self.index()
     }
     /// returns the leaf index of this merkle proof is proving
     pub fn index(&self) -> usize {
@@ -160,7 +160,7 @@ mod tests {
             for _ in 0..10 {
                 let idx = rng.gen_range(0..size) as usize;
                 let proof = mt.generate_proof(idx);
-                assert!(proof.verify(&root, leaves[idx].as_slice()));
+                assert!(proof.verify(&root, idx, leaves[idx].as_slice()));
                 assert_eq!(mt.height(), proof.height());
                 assert_eq!(proof.capacity(), size);
             }
