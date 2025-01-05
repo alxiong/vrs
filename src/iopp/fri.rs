@@ -8,6 +8,7 @@ use nimue::{plugins::ark::*, *};
 use p3_maybe_rayon::prelude::*;
 
 use crate::{
+    iopp::fri_params,
     matrix::Matrix,
     merkle_tree::{Path, SymbolMerkleTree},
 };
@@ -19,27 +20,67 @@ pub struct FriConfig {
     pub log_blowup: usize,
     /// number of queries
     pub num_queries: usize,
-    // TODO: allow more flexible per-step reduction
-    // // reduction factor: a_i = |D_i-1| / |D_i| >= 2
-    // pub red_factors: Vec<usize>,
     /// Proof-of-work for grinding
     pub pow_bits: usize,
+    /// Input message length, equivalently degree bound
+    pub msg_len: usize,
+    /// Number of rounds of interaction, derived
+    pub num_rounds: usize,
+    /// Size of D_0 or L_0, the initial evaluation domain, derived = msg_len * blowup
+    pub init_domain_size: usize,
     /// IOP transcript io pattern
     io: IOPattern,
 }
 
 impl FriConfig {
-    /// init a config
-    pub fn new<F>(
+    /// Using conjectured security of FRI: stronger assumption, more fragile, shorter proof size.
+    /// See Conjecture 1 of https://eprint.iacr.org/2024/1161.pdf
+    ///
+    /// - `pow_bits` is optional and default to 16, bigger value means slower prover and shorter proofs
+    /// - `sec_bits`: only 80/100-bit security, default to 100
+    pub fn new_conjectured<F: Field>(
+        msg_len: usize,
+        log_blowup: usize,
+        pow_bits: Option<usize>,
+        sec_bits: Option<usize>,
+    ) -> Self {
+        let sec_bits = sec_bits.unwrap_or(100);
+        let pow_bits = pow_bits.unwrap_or(16);
+        let blowup = 1 << log_blowup;
+        let num_queries = fri_params::conjectured::num_queries::<F>(sec_bits, blowup, pow_bits);
+
+        Self::new_unchecked::<F>(msg_len, log_blowup, num_queries, pow_bits)
+    }
+
+    /// Similar to [`Self::new_conjectured`] but with provable bounds.
+    /// See Theorem 1 of https://eprint.iacr.org/2024/1161.pdf
+    pub fn new_provable<F: Field>(
+        msg_len: usize,
+        log_blowup: usize,
+        pow_bits: Option<usize>,
+        sec_bits: Option<usize>,
+    ) -> Self {
+        let sec_bits = sec_bits.unwrap_or(100);
+        let pow_bits = pow_bits.unwrap_or(16);
+        let blowup = 1 << log_blowup;
+        let num_queries =
+            fri_params::provable::num_queries::<F>(sec_bits, msg_len, blowup, pow_bits);
+
+        Self::new_unchecked::<F>(msg_len, log_blowup, num_queries, pow_bits)
+    }
+
+    /// init a config without checking security level
+    pub fn new_unchecked<F>(
+        msg_len: usize,
         log_blowup: usize,
         num_queries: usize,
         pow_bits: usize,
-        init_domain_size: usize,
     ) -> Self
     where
         F: Field,
     {
         let mut io = IOPattern::<DefaultHash>::new("FRI");
+        let init_domain_size = msg_len * (1 << log_blowup);
         let num_rounds = init_domain_size.ilog2() as usize - log_blowup;
         for round in 0..num_rounds {
             io = io.absorb(32, &format!("root_{}", round));
@@ -57,6 +98,9 @@ impl FriConfig {
             log_blowup,
             num_queries,
             pow_bits,
+            msg_len,
+            num_rounds,
+            init_domain_size,
             io,
         }
     }
@@ -147,9 +191,9 @@ where
     F: FftField,
 {
     let mut merlin = config.io.to_merlin();
-    let num_rounds = evals.evals.len().ilog2() as usize - config.log_blowup;
+    let num_rounds = config.num_rounds;
     let elems: Vec<F> = evals.domain().elements().collect();
-    let domain_0_size = elems.len();
+    let domain_0_size = config.init_domain_size;
 
     // Commit Phase
     let mut folded = evals.evals.clone();
@@ -266,8 +310,8 @@ where
 {
     let mut arthur = config.io.to_arthur(&proof.transcript);
     assert_eq!(proof.query_proofs.len(), config.num_queries);
-    let num_rounds = proof.query_proofs[0].num_rounds();
-    let domain_0_size = proof.query_proofs[0].init_domain_size();
+    let num_rounds = config.num_rounds;
+    let domain_0_size = config.init_domain_size;
     let elems: Vec<F> = Radix2EvaluationDomain::new(domain_0_size)
         .unwrap()
         .elements()
@@ -346,14 +390,15 @@ mod tests {
         let log_blowup = 1;
         let num_queries = 5;
         let pow_bits = 3;
-        let init_domain_size = 64;
+        let msg_len = 32;
+        let init_domain_size = msg_len * (1 << log_blowup);
         let domain = Radix2EvaluationDomain::new(init_domain_size).unwrap();
         let coeffs = (0..init_domain_size / (1 << log_blowup))
             .map(|_| Fr::rand(rng))
             .collect::<Vec<_>>();
         let evals = domain.fft(&coeffs);
 
-        let config = FriConfig::new::<Fr>(log_blowup, num_queries, pow_bits, init_domain_size);
+        let config = FriConfig::new_unchecked::<Fr>(msg_len, log_blowup, num_queries, pow_bits);
         let fri_proof = super::prove(&config, Evaluations::from_vec_and_domain(evals, domain));
         assert!(super::verify(&config, &fri_proof));
 
@@ -376,7 +421,12 @@ mod tests {
             .collect::<Vec<_>>();
         let domain = Radix2EvaluationDomain::new(init_domain_size).unwrap();
 
-        let config = FriConfig::new::<Fr>(log_blowup, num_queries, pow_bits, init_domain_size);
+        let config = FriConfig::new_unchecked::<Fr>(
+            init_domain_size / (1 << log_blowup),
+            log_blowup,
+            num_queries,
+            pow_bits,
+        );
         // this will fail since the final folded constant poly shouldn't match
         super::prove(&config, Evaluations::from_vec_and_domain(bad_evals, domain));
     }
