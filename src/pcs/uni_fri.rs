@@ -9,6 +9,7 @@ use ark_poly::{
     univariate::DensePolynomial, DenseUVPolynomial, EvaluationDomain, Polynomial,
     Radix2EvaluationDomain,
 };
+use ark_serialize::*;
 use ark_std::marker::PhantomData;
 use nimue::*;
 use p3_maybe_rayon::prelude::*;
@@ -18,9 +19,8 @@ pub struct UniFriPCS<F>(PhantomData<F>);
 
 impl<F: FftField> UniFriPCS<F> {
     /// Transparent setup
-    /// - sec_bit: security level, at least >= 112, preferably >=128
-    /// - log_blowup: log of blowup factor
     /// - max_degree: degree upper bound of the polynomial to be committed
+    /// - log_blowup: log of blowup factor
     pub fn setup(max_degree: usize, log_blowup: usize) -> UniFriURS<F> {
         let config = FriConfig::new_conjectured::<F>(max_degree + 1, log_blowup, None, None);
         let domain = Radix2EvaluationDomain::new(config.init_domain_size).unwrap();
@@ -139,7 +139,7 @@ impl<F: FftField> UniFriPCS<F> {
 }
 
 /// Evaluation/Opening proof for `UniFriPCS`
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize)]
 pub struct UniFriProof<F: Field> {
     /// Transcript containing
     /// - the commitments to the original polynomial and witness polynomial
