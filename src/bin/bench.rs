@@ -10,7 +10,8 @@ use ark_std::{
 use itertools::Itertools;
 use jf_pcs::prelude::*;
 use vrs::{
-    advz::AdvzVRS, bivariate, bkzg::*, matrix::Matrix, nnt::kzg::KzgNntVRS, VerifiableReedSolomon,
+    advz::AdvzVRS, bivariate, matrix::Matrix, nnt::kzg::KzgNntVRS, pcs::bkzg::*,
+    VerifiableReedSolomon,
 };
 
 use std::time::Instant;

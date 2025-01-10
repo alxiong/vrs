@@ -19,7 +19,6 @@ use thiserror::Error;
 
 pub mod advz;
 pub mod bivariate;
-pub mod gxz;
 pub mod iopp;
 pub mod matrix;
 pub mod merkle_tree;
