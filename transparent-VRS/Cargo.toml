@@ -1,0 +1,7 @@
+[workspace]
+members = [ 
+    "frida",
+    "util", 
+    "veri_rs"
+]
+
