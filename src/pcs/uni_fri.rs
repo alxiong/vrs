@@ -11,7 +11,6 @@ use ark_poly::{
 };
 use ark_serialize::*;
 use ark_std::marker::PhantomData;
-use nimue::*;
 use p3_maybe_rayon::prelude::*;
 
 /// Univariate FRI PCS
@@ -22,83 +21,48 @@ impl<F: FftField> UniFriPCS<F> {
     /// - max_degree: degree upper bound of the polynomial to be committed
     /// - log_blowup: log of blowup factor
     pub fn setup(max_degree: usize, log_blowup: usize) -> UniFriURS<F> {
-        let config = FriConfig::new_conjectured::<F>(max_degree + 1, log_blowup, None, None);
-        let domain = Radix2EvaluationDomain::new(config.init_domain_size).unwrap();
-        let io = IOPattern::<DefaultHash>::new("UniFriEval")
-            .absorb(32, "cm_p")
-            .absorb(32, "cm_w")
-            .squeeze(8, "x_idx");
-        UniFriURS { config, domain, io }
+        let fri_config = FriConfig::new_conjectured::<F>(max_degree + 1, log_blowup, None, None);
+        let domain = Radix2EvaluationDomain::new(fri_config.init_domain_size).unwrap();
+        UniFriURS { fri_config, domain }
     }
 
-    /// Commit to a polynomial, returns the merkle root of all evaluations in domain D_0
-    pub fn commit(pp: &UniFriURS<F>, poly: &DensePolynomial<F>) -> Vec<u8> {
-        let evals: Vec<[F; 1]> = pp
-            .domain
-            .fft(&poly.coeffs)
-            .into_par_iter()
-            .map(|f| [f]) // SymbolMerkleTree only accept [F] as leaf
-            .collect();
-        let mt = SymbolMerkleTree::<F>::new(evals);
-        mt.root()
+    /// Commit to a polynomial, returns the merkle root of all evaluations in domain D_0, and prover data
+    pub fn commit(pp: &UniFriURS<F>, poly: &DensePolynomial<F>) -> (Vec<u8>, UniFriProverData<F>) {
+        let evals = pp.domain.fft(&poly.coeffs);
+        let mt = SymbolMerkleTree::<F>::from_single_elem_leaves(&evals);
+
+        (mt.root(), UniFriProverData { evals, mt })
     }
 
     /// Open/Evaluate `poly` at `point` and return the evaluation/opening proof and the evaluation
     /// p(y) = z where y is `point`, and `z` is eval being returned with a proof
-    pub fn open(pp: &UniFriURS<F>, poly: &DensePolynomial<F>, point: &F) -> (F, UniFriProof<F>) {
-        let mut merlin = pp.io.to_merlin();
-
-        // Commit the original polynomial
-        let evals: Vec<[F; 1]> = pp
-            .domain
-            .fft(&poly.coeffs)
-            .into_par_iter()
-            .map(|f| [f])
-            .collect();
-        let mt = SymbolMerkleTree::<F>::new(evals);
-
+    pub fn open(
+        pp: &UniFriURS<F>,
+        pd: &UniFriProverData<F>,
+        poly: &DensePolynomial<F>,
+        point: &F,
+    ) -> (F, UniFriProof<F>) {
         // Compute and commit to the witness polynomial
         let eval = poly.evaluate(point);
-        // w(X) = (p(X) - y) / (X - z), since remainder is zero anyway, we save `-y` part
+        // w(X) = (p(X) - y) / (X - z), since remainder is zero anyway, we save `-y` before division
         let witness_poly = {
             let divisor = DensePolynomial::from_coefficients_slice(&[-*point, F::ONE]);
             poly / &divisor
         };
         let wit_evals = witness_poly.evaluate_over_domain_by_ref(pp.domain);
-        let wit_mt = SymbolMerkleTree::<F>::new(
-            wit_evals
-                .evals
-                .par_iter()
-                .map(|f| [*f])
-                .collect::<Vec<[F; 1]>>(),
-        );
-
-        // Append to Transcript
-        merlin.add_bytes(&mt.root()).unwrap();
-        merlin.add_bytes(&wit_mt.root()).unwrap();
-
-        // derive a in-domain element x (via its index)
-        let x_idx =
-            (u64::from_le_bytes(merlin.challenge_bytes::<8>().unwrap()) % pp.domain.size) as usize;
-        let x = pp.domain.element(x_idx);
-
-        // get proofs of evaluation at L_0[x_idx] on both p(X) and w(X)
-        let in_domain_eval = poly.evaluate(&x);
-        let eval_proof = mt.generate_proof(x_idx);
-        let in_domain_wit_eval = witness_poly.evaluate(&x);
-        let witness_eval_proof = wit_mt.generate_proof(x_idx);
-
         // low-degree test on the witness polynomial
-        let fri_proof = fri::prove(&pp.config, wit_evals);
+        let fri_proof = fri::prove(&pp.fri_config, wit_evals);
+
+        let evals_and_proofs = fri_proof
+            .queries(&pp.fri_config)
+            .par_iter()
+            .map(|&idx| (pd.evals[idx], pd.mt.generate_proof(idx)))
+            .collect();
 
         (
             eval,
             UniFriProof {
-                transcript: merlin.transcript().to_vec(),
-                in_domain_eval,
-                eval_proof,
-                in_domain_wit_eval,
-                witness_eval_proof,
+                evals_and_proofs,
                 fri_proof,
             },
         )
@@ -107,51 +71,45 @@ impl<F: FftField> UniFriPCS<F> {
     /// Verify an opening proof
     pub fn verify(
         pp: &UniFriURS<F>,
-        commitment: &[u8],
+        commitment: &Vec<u8>,
         point: &F,
         value: &F,
         proof: &UniFriProof<F>,
     ) -> bool {
-        let mut arthur = pp.io.to_arthur(&proof.transcript);
-        let comm = arthur.next_bytes::<32>().unwrap().to_vec();
-        let wit_comm = arthur.next_bytes::<32>().unwrap().to_vec();
-        assert_eq!(&comm, commitment);
+        let query_indices = proof.fri_proof.queries(&pp.fri_config);
+        assert_eq!(query_indices.len(), proof.evals_and_proofs.len());
+        assert_eq!(query_indices.len(), proof.fri_proof.query_proofs.len());
 
-        // FS-derive x (via its index)
-        let x_idx =
-            (u64::from_le_bytes(arthur.challenge_bytes::<8>().unwrap()) % pp.domain.size) as usize;
-        let x = pp.domain.element(x_idx);
-
-        // verify all evaluation proof (merkle proof of evaluation tree)
-        if !proof
-            .eval_proof
-            .verify(&comm, x_idx, [proof.in_domain_eval])
-            || !proof
-                .witness_eval_proof
-                .verify(&wit_comm, x_idx, [proof.in_domain_wit_eval])
-        {
-            return false;
-        }
-
-        // verify p(x) - y = (x - z)* w(x)
-        proof.in_domain_eval - value == (x - point) * proof.in_domain_wit_eval
+        // 1. check f(x) = y + (x - z) * w(x)
+        let mut verified = query_indices
+            .par_iter()
+            .zip(proof.evals_and_proofs.par_iter())
+            .zip(proof.fri_proof.query_proofs.par_iter())
+            .all(|((&idx, (eval, proof)), query_proof)| {
+                let x = pp.domain.element(idx);
+                *eval == *value + (x - point) * query_proof.query_eval
+                    && proof.verify(commitment, idx, [*eval])
+            });
+        // 2. verifiy low-degreeness of the witness poly
+        verified &= fri::verify(&pp.fri_config, &proof.fri_proof);
+        verified
     }
+}
+
+/// Prover data to enable opening of committed polynomial
+#[derive(Clone)]
+pub struct UniFriProverData<F: Field> {
+    /// Evaluations of the polynomial committed over the eval domain in FriConfig
+    pub evals: Vec<F>,
+    /// The merkle tree for
+    pub mt: SymbolMerkleTree<F>,
 }
 
 /// Evaluation/Opening proof for `UniFriPCS`
 #[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize)]
 pub struct UniFriProof<F: Field> {
-    /// Transcript containing
-    /// - the commitments to the original polynomial and witness polynomial
-    pub transcript: Vec<u8>,
-    /// p(x) for an x sampled from L_0 domain (instead of the overall field)
-    pub in_domain_eval: F,
-    /// evaluation proof of p(x) via a merkle proof against `comm` for a FS-derived x
-    pub eval_proof: Path<F>,
-    /// w(x) for an x sampled from L_0 domain (instead of the overall field)
-    pub in_domain_wit_eval: F,
-    /// evaluation proof of w(x) via a merkle proof against `witness_comm` for the same x
-    pub witness_eval_proof: Path<F>,
+    /// Evaluation proofs of queried points on the original f, each pair is (eval, merkle_proof)
+    pub evals_and_proofs: Vec<(F, Path<F>)>,
     /// IOPP proof that witness polynomial is a low-degree poly
     pub fri_proof: FriProof<F>,
 }
@@ -160,11 +118,9 @@ pub struct UniFriProof<F: Field> {
 #[derive(Debug, Clone)]
 pub struct UniFriURS<F: FftField> {
     /// FRI config, affect security level including conjectured soundness
-    pub config: FriConfig,
+    pub fri_config: FriConfig,
     /// evaluation domain D_0
     pub domain: Radix2EvaluationDomain<F>,
-    /// Prover-verifier interaction pattern in open/eval protocol
-    pub io: IOPattern,
 }
 
 #[cfg(test)]
@@ -182,16 +138,15 @@ mod tests {
         let log_blowup = 1;
 
         let pp = UniFriPCS::<Fr>::setup(max_degree, log_blowup);
-        println!("config: {:?}", pp.config);
         for _ in 0..5 {
             let degree = rng.gen_range(0..max_degree);
             let poly = DensePolynomial::rand(degree, rng);
-            let comm = UniFriPCS::commit(&pp, &poly);
+            let (comm, prover_data) = UniFriPCS::commit(&pp, &poly);
 
             for _ in 0..10 {
                 let point = Fr::rand(rng);
 
-                let (eval, proof) = UniFriPCS::open(&pp, &poly, &point);
+                let (eval, proof) = UniFriPCS::open(&pp, &prover_data, &poly, &point);
                 assert!(UniFriPCS::verify(&pp, &comm, &point, &eval, &proof));
                 assert_eq!(eval, poly.evaluate(&point));
             }
