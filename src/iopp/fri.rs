@@ -120,11 +120,31 @@ pub struct FriProof<F: Field> {
     pub query_proofs: Vec<QueryProof<F>>,
 }
 
+impl<F: Field> FriProof<F> {
+    /// Returns all queried indices
+    pub fn queries(&self, config: &FriConfig) -> Vec<usize> {
+        // Simulate verifier's logic to derive all the queried indices
+        let mut arthur = config.io.to_arthur(&self.transcript);
+        let domain_0_size = config.init_domain_size;
+        for _ in 0..config.num_rounds {
+            arthur.next_bytes::<32>().unwrap();
+            let [_beta]: [F; 1] = arthur.challenge_scalars().unwrap();
+        }
+        let [_final_poly]: [F; 1] = arthur.next_scalars().unwrap();
+        arthur
+            .challenge_pow::<Blake3PoW>(config.pow_bits as f64)
+            .unwrap();
+        (0..config.num_queries)
+            .map(|_| usize::from_le_bytes(arthur.challenge_bytes().unwrap()) % domain_0_size)
+            .collect()
+    }
+}
+
 /// Proof for a single FRI query for all rounds
 #[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize)]
 pub struct QueryProof<F: Field> {
-    /// Top-most queried point, i.e. s_0 \in F
-    pub query_point: F,
+    /// Top-most queried evaluation, i.e. f(s_0) where s_0 \in D_0
+    pub query_eval: F,
     /// answering (sibling_value, mt_proof) for per-round query,
     /// each leaf contains (folded_value, sibling_value)
     /// in-order: large domain to smaller reduced domain
@@ -251,7 +271,7 @@ where
                 )
                 .collect::<Vec<(F, Path<F>)>>();
             QueryProof {
-                query_point: evals.evals[s_0_idx],
+                query_eval: evals.evals[s_0_idx],
                 openings,
             }
         })
@@ -303,7 +323,7 @@ where
         .all(|(s_0_idx, query_proof)| {
             let mut idx = s_0_idx;
             let mut tree_size = domain_0_size / 2;
-            let mut folded = query_proof.query_point;
+            let mut folded = query_proof.query_eval;
 
             for (round, (sibling, mt_proof), root, beta) in
                 izip!(0..num_rounds, &query_proof.openings, &commits, &betas)

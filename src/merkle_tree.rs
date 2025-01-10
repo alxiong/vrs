@@ -68,6 +68,12 @@ impl<F: Field> SymbolMerkleTree<F> {
         Self::new(leaves.iter().map(|x| x.borrow()))
     }
 
+    /// Construct from a merkle tree where each leaf is a single field element; whereas the general `Self::new()`
+    /// is expecting an array of elements per leaf
+    pub fn from_single_elem_leaves(leaves: &[F]) -> Self {
+        Self::new(leaves.iter().map(|x| [*x]))
+    }
+
     /// Create an empty merkle tree such that all leaves are zero-filled.
     pub fn blank(height: usize) -> Self {
         let inner =
