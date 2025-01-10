@@ -6,7 +6,7 @@ use p3_maybe_rayon::prelude::*;
 
 use crate::{
     bivariate::DensePolynomial,
-    bkzg::{BivariateProverParam, PartialEvalProof},
+    pcs::bkzg::{BivariateProverParam, PartialEvalProof},
 };
 
 /// Same as [`multi_partial_eval()`], with precomputed table from [`multi_partial_eval_precompute()`]
@@ -119,7 +119,7 @@ pub fn multi_partial_eval_precompute<E: Pairing>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{bkzg::*, test_utils::test_rng};
+    use crate::{pcs::bkzg::*, test_utils::test_rng};
     use ark_bn254::{Bn254, Fr};
     use ark_poly::EvaluationDomain;
     use ark_std::rand::Rng;
