@@ -1,8 +1,12 @@
 //! FRI low-degree test
+//!
+//! # Reference
+//! - batching: https://eprint.iacr.org/2020/654.pdf (Sec 8.2)
 
 use ark_ff::{batch_inversion_and_mul, FftField, Field};
 use ark_poly::{EvaluationDomain, Evaluations, Radix2EvaluationDomain};
 use ark_serialize::*;
+use ark_std::iter::successors;
 use itertools::izip;
 use nimue::{plugins::ark::*, *};
 use nimue_pow::{blake3::Blake3PoW, PoWChallenge, PoWIOPattern};
@@ -29,6 +33,8 @@ pub struct FriConfig {
     pub num_rounds: usize,
     /// Size of D_0 or L_0, the initial evaluation domain, derived = msg_len * blowup
     pub init_domain_size: usize,
+    /// Batching number for batched FRI
+    pub num_batches: usize,
     /// IOP transcript io pattern
     io: IOPattern,
 }
@@ -39,18 +45,21 @@ impl FriConfig {
     ///
     /// - `pow_bits` is optional and default to 16, bigger value means slower prover and shorter proofs
     /// - `sec_bits`: only 80/100-bit security, default to 100
+    /// - `num_batches`: Proving a batch of polynomial using simple batched FRI
     pub fn new_conjectured<F: Field>(
         msg_len: usize,
         log_blowup: usize,
         pow_bits: Option<usize>,
         sec_bits: Option<usize>,
+        num_batches: Option<usize>,
     ) -> Self {
         let sec_bits = sec_bits.unwrap_or(100);
         let pow_bits = pow_bits.unwrap_or(16);
+        let num_batches = num_batches.unwrap_or(1);
         let blowup = 1 << log_blowup;
         let num_queries = fri_params::conjectured::num_queries::<F>(sec_bits, blowup, pow_bits);
 
-        Self::new_unchecked::<F>(msg_len, log_blowup, num_queries, pow_bits)
+        Self::new_unchecked::<F>(msg_len, log_blowup, num_queries, pow_bits, num_batches)
     }
 
     /// Similar to [`Self::new_conjectured`] but with provable bounds.
@@ -60,14 +69,16 @@ impl FriConfig {
         log_blowup: usize,
         pow_bits: Option<usize>,
         sec_bits: Option<usize>,
+        num_batches: Option<usize>,
     ) -> Self {
         let sec_bits = sec_bits.unwrap_or(100);
         let pow_bits = pow_bits.unwrap_or(16);
+        let num_batches = num_batches.unwrap_or(1);
         let blowup = 1 << log_blowup;
         let num_queries =
             fri_params::provable::num_queries::<F>(sec_bits, msg_len, blowup, pow_bits);
 
-        Self::new_unchecked::<F>(msg_len, log_blowup, num_queries, pow_bits)
+        Self::new_unchecked::<F>(msg_len, log_blowup, num_queries, pow_bits, num_batches)
     }
 
     /// init a config without checking security level
@@ -76,11 +87,16 @@ impl FriConfig {
         log_blowup: usize,
         num_queries: usize,
         pow_bits: usize,
+        num_batches: usize,
     ) -> Self
     where
         F: Field,
     {
         let mut io = IOPattern::<DefaultHash>::new("FRI");
+        if num_batches > 1 {
+            io = io.absorb(32, "root_batch"); // commit to the entire matrix/batch of evaluations
+            io = FieldIOPattern::<F>::challenge_scalars(io, 1, "batch_alpha");
+        }
         let init_domain_size = (msg_len * (1 << log_blowup)).next_power_of_two();
         let num_rounds = init_domain_size.ilog2() as usize - log_blowup;
         for round in 0..num_rounds {
@@ -100,6 +116,7 @@ impl FriConfig {
             msg_len,
             num_rounds,
             init_domain_size,
+            num_batches,
             io,
         }
     }
@@ -118,6 +135,8 @@ pub struct FriProof<F: Field> {
     pub transcript: Vec<u8>,
     /// Query proofs for all queries
     pub query_proofs: Vec<QueryProof<F>>,
+    /// Proof of correct batching, optional for batched FRI
+    pub batching_proof: Option<Vec<BatchedColProof<F>>>,
 }
 
 impl<F: Field> FriProof<F> {
@@ -125,6 +144,10 @@ impl<F: Field> FriProof<F> {
     pub fn queries(&self, config: &FriConfig) -> Vec<usize> {
         // Simulate verifier's logic to derive all the queried indices
         let mut arthur = config.io.to_arthur(&self.transcript);
+        if config.num_batches > 1 {
+            arthur.next_bytes::<32>().unwrap();
+            let [_alpha]: [F; 1] = arthur.challenge_scalars().unwrap();
+        }
         let domain_0_size = config.init_domain_size;
         for _ in 0..config.num_rounds {
             arthur.next_bytes::<32>().unwrap();
@@ -138,6 +161,16 @@ impl<F: Field> FriProof<F> {
             .map(|_| usize::from_le_bytes(arthur.challenge_bytes().unwrap()) % domain_0_size)
             .collect()
     }
+}
+
+/// The query proof on the interleaved matrix.
+/// NOTE: it's not a batched proof, it's the query proof of correct batching as part of the batched FRI
+#[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize)]
+pub struct BatchedColProof<F: Field> {
+    /// Evaluations of the queried column (query index is the top-most query on the batched eval)
+    pub query_col_evals: Vec<F>,
+    /// Merkle proof of each column
+    pub opening_proof: Path<F>,
 }
 
 /// Proof for a single FRI query for all rounds
@@ -337,10 +370,19 @@ where
     F: FftField,
 {
     let mut merlin = config.io.to_merlin();
+    prove_internal(&mut merlin, config, evals)
+}
+
+/// Core prover logic, shared between single-instance and batched prover
+fn prove_internal<F: FftField>(
+    merlin: &mut Merlin,
+    config: &FriConfig,
+    evals: Evaluations<F, Radix2EvaluationDomain<F>>,
+) -> FriProof<F> {
     let domain_0_size = config.init_domain_size;
 
     // Commit phase
-    let pd = commit_phase(config, evals, &mut merlin);
+    let pd = commit_phase(config, evals, merlin);
 
     // Perform Proof-of-work grinding
     merlin
@@ -362,7 +404,67 @@ where
     FriProof {
         transcript: merlin.transcript().to_owned(),
         query_proofs,
+        batching_proof: None,
     }
+}
+
+/// Batched FRI, receiving a matrix of evaluations (each row corresponds to evals of a separate polynomial)
+/// Sec 8.2 of https://eprint.iacr.org/2020/654.pdf
+pub fn batch_prove<F: FftField>(config: &FriConfig, evals: &Matrix<F>) -> FriProof<F> {
+    let mut merlin = config.io.to_merlin();
+
+    // first commit all batches column wise
+    let leaves = evals.par_col().collect::<Vec<Vec<_>>>();
+    let mt = SymbolMerkleTree::<F>::from_slice(&leaves);
+    merlin.add_bytes(&mt.root()).unwrap();
+
+    // derive the random combiner alpha, and linear combine all rows
+    let [alpha]: [F; 1] = merlin.challenge_scalars().unwrap();
+    let alpha_powers: Vec<F> = successors(Some(F::ONE), |&prev| Some(prev * alpha))
+        .take(evals.height())
+        .collect();
+    let batched_eval: Vec<F> = alpha_powers
+        .par_iter()
+        .zip(evals.par_row_enumerate())
+        .map(|(&alpha_pow, (_, evals))| {
+            evals
+                .par_iter()
+                .map(|eval| alpha_pow * eval)
+                .collect::<Vec<F>>()
+        })
+        .reduce(
+            || Vec::with_capacity(evals.width()),
+            |mut acc, v| {
+                if acc.is_empty() {
+                    acc = v;
+                } else {
+                    acc.par_iter_mut()
+                        .zip(v.par_iter())
+                        .for_each(|(a, v)| *a += v);
+                }
+                acc
+            },
+        );
+
+    // run the single-instance FRI on the batched/aggregated evals
+    let evals = Evaluations::from_vec_and_domain(
+        batched_eval,
+        Radix2EvaluationDomain::new(config.init_domain_size).unwrap(),
+    );
+    let mut proof = prove_internal(&mut merlin, config, evals);
+
+    // Update all the query opening proof on batched matrix to prove correct batching
+    let batching_proof = proof
+        .queries(config)
+        .par_iter()
+        .map(|&idx| BatchedColProof {
+            query_col_evals: leaves[idx].clone(),
+            opening_proof: mt.generate_proof(idx),
+        })
+        .collect();
+    proof.batching_proof = Some(batching_proof);
+
+    proof
 }
 
 /// Verifying a FRI proof of low-degreeness
@@ -372,6 +474,14 @@ where
 {
     let mut arthur = config.io.to_arthur(&proof.transcript);
     assert_eq!(proof.query_proofs.len(), config.num_queries);
+
+    let mut batch_root = vec![0u8; 32];
+    let mut alpha = F::ZERO;
+    if config.num_batches > 1 {
+        batch_root = arthur.next_bytes::<32>().unwrap().to_vec();
+        [alpha] = arthur.challenge_scalars().unwrap();
+    }
+
     let num_rounds = config.num_rounds;
     let domain_0_size = config.init_domain_size;
 
@@ -396,12 +506,43 @@ where
         .collect();
 
     // Verify each query proof in parallel
-    s_0_indices
-        .into_par_iter()
+    let mut verified = s_0_indices
+        .par_iter()
         .zip(proof.query_proofs.par_iter())
-        .all(|(s_0_idx, query_proof)| {
+        .all(|(&s_0_idx, query_proof)| {
             query_proof.verify(config, &commits, &betas, s_0_idx, &final_poly)
-        })
+        });
+
+    // for batched FRI, verify the batching on queried columns
+    if let Some(batching_proof) = &proof.batching_proof {
+        let alpha_powers: Vec<F> = successors(Some(F::ONE), |&prev| Some(prev * alpha))
+            .take(config.num_batches)
+            .collect();
+
+        verified &= s_0_indices
+            .par_iter()
+            .zip(batching_proof.par_iter())
+            .zip(proof.query_proofs.par_iter())
+            .all(|((&idx, col_proof), query_proof)| {
+                // check correct column batching via linear combination
+                let mut col_verified = alpha_powers
+                    .par_iter()
+                    .zip(col_proof.query_col_evals.par_iter())
+                    .map(|(&alpha_pow, eval)| alpha_pow * eval)
+                    .sum::<F>()
+                    == query_proof.query_eval;
+
+                // check correct column opening
+                col_verified &= col_proof.opening_proof.verify(
+                    &batch_root,
+                    idx,
+                    col_proof.query_col_evals.clone(),
+                );
+
+                col_verified
+            });
+    }
+    verified
 }
 
 #[cfg(test)]
@@ -412,12 +553,46 @@ mod tests {
     use ark_std::UniformRand;
 
     #[test]
+    fn test_batched_fri() {
+        let rng = &mut test_rng();
+        let log_blowup = 2;
+        let num_queries = 20;
+        let pow_bits = 3;
+        let msg_len = 32;
+        let num_batches = 5;
+        let init_domain_size = msg_len * (1 << log_blowup);
+        let domain = Radix2EvaluationDomain::<Fr>::new(init_domain_size).unwrap();
+        let evals = (0..num_batches)
+            .map(|_| {
+                let coeffs = (0..init_domain_size / (1 << log_blowup))
+                    .map(|_| Fr::rand(rng))
+                    .collect::<Vec<_>>();
+                domain.fft(&coeffs)
+            })
+            .flatten()
+            .collect();
+        let matrix = Matrix::new(evals, init_domain_size, num_batches).unwrap();
+
+        let config =
+            FriConfig::new_unchecked::<Fr>(msg_len, log_blowup, num_queries, pow_bits, num_batches);
+        let fri_proof = super::batch_prove(&config, &matrix);
+        assert!(super::verify(&config, &fri_proof));
+
+        let mut bad_proof = fri_proof.clone();
+        let mut bad_batching_proof = fri_proof.batching_proof.clone().unwrap();
+        bad_batching_proof[0].query_col_evals[0] += Fr::rand(rng);
+        bad_proof.batching_proof = Some(bad_batching_proof);
+        assert!(!super::verify(&config, &bad_proof));
+    }
+
+    #[test]
     fn test_fri() {
         let rng = &mut test_rng();
         let log_blowup = 1;
         let num_queries = 5;
         let pow_bits = 3;
         let msg_len = 32;
+        let num_batches = 1;
         let init_domain_size = msg_len * (1 << log_blowup);
         let domain = Radix2EvaluationDomain::new(init_domain_size).unwrap();
         let coeffs = (0..init_domain_size / (1 << log_blowup))
@@ -425,7 +600,8 @@ mod tests {
             .collect::<Vec<_>>();
         let evals = domain.fft(&coeffs);
 
-        let config = FriConfig::new_unchecked::<Fr>(msg_len, log_blowup, num_queries, pow_bits);
+        let config =
+            FriConfig::new_unchecked::<Fr>(msg_len, log_blowup, num_queries, pow_bits, num_batches);
         let fri_proof = super::prove(&config, Evaluations::from_vec_and_domain(evals, domain));
         assert!(super::verify(&config, &fri_proof));
 
@@ -441,6 +617,7 @@ mod tests {
         let log_blowup = 1;
         let num_queries = 5;
         let pow_bits = 2;
+        let num_batches = 1;
         let init_domain_size = 64;
         // these don't match the evaluation of a polynomial of degree `init_domain_size / (1 << log_blowup)`
         let bad_evals = (0..init_domain_size)
@@ -453,6 +630,7 @@ mod tests {
             log_blowup,
             num_queries,
             pow_bits,
+            num_batches,
         );
         // this will fail since the final folded constant poly shouldn't match
         super::prove(&config, Evaluations::from_vec_and_domain(bad_evals, domain));

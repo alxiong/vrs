@@ -24,7 +24,8 @@ impl<F: FftField> UniFriPCS<F> {
     /// - max_degree: degree upper bound of the polynomial to be committed
     /// - log_blowup: log of blowup factor
     pub fn setup(max_degree: usize, log_blowup: usize) -> UniFriURS<F> {
-        let fri_config = FriConfig::new_conjectured::<F>(max_degree + 1, log_blowup, None, None);
+        let fri_config =
+            FriConfig::new_conjectured::<F>(max_degree + 1, log_blowup, None, None, None);
         let domain = Radix2EvaluationDomain::new(fri_config.init_domain_size).unwrap();
         UniFriURS { fri_config, domain }
     }
