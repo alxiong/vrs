@@ -4,7 +4,7 @@
 //! - https://eprint.iacr.org/2019/1020.pdf
 
 use crate::{
-    iopp::fri::{self, FriConfig, FriProof},
+    iopp::fri::{self, FriConfig, FriProof, TranscriptData},
     merkle_tree::{Path, SymbolMerkleTree},
 };
 use ark_ff::{FftField, Field};
@@ -57,8 +57,8 @@ impl<F: FftField> UniFriPCS<F> {
         // low-degree test on the witness polynomial
         let fri_proof = fri::prove(&pp.fri_config, wit_evals);
 
-        let evals_and_proofs = fri_proof
-            .queries(&pp.fri_config)
+        let evals_and_proofs = TranscriptData::<F>::parse(&pp.fri_config, &fri_proof.transcript)
+            .query_indices
             .par_iter()
             .map(|&idx| (pd.evals[idx], pd.mt.generate_proof(idx)))
             .collect();
@@ -80,7 +80,8 @@ impl<F: FftField> UniFriPCS<F> {
         value: &F,
         proof: &UniFriProof<F>,
     ) -> bool {
-        let query_indices = proof.fri_proof.queries(&pp.fri_config);
+        let query_indices =
+            TranscriptData::<F>::parse(&pp.fri_config, &proof.fri_proof.transcript).query_indices;
         assert_eq!(query_indices.len(), proof.evals_and_proofs.len());
         assert_eq!(query_indices.len(), proof.fri_proof.query_proofs.len());
 

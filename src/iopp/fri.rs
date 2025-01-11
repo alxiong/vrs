@@ -94,7 +94,7 @@ impl FriConfig {
     {
         let mut io = IOPattern::<DefaultHash>::new("FRI");
         if num_batches > 1 {
-            io = io.absorb(32, "root_batch"); // commit to the entire matrix/batch of evaluations
+            io = io.absorb(32, "batch_root"); // commit to the entire matrix/batch of evaluations
             io = FieldIOPattern::<F>::challenge_scalars(io, 1, "batch_alpha");
         }
         let init_domain_size = (msg_len * (1 << log_blowup)).next_power_of_two();
@@ -127,6 +127,77 @@ impl FriConfig {
     }
 }
 
+/// Messages passed between prover and verifier, namely the transcript
+/// Corresponding to the `IOPattern` created during `FriConfig::new_unchecked()`
+///
+/// NOTE: reason why we don't directly include `TranscriptData` in `FriProof`
+/// is the entire transcript construction spans over multiple API boundaries:
+/// from commit phase to grinding to queries sampling, if we pass a partial
+/// transcript around would makes the types ugly and unintutively. Instead, we
+/// only let `merlin` be the state-carrying variable, which can snapshot to a
+/// transcript bytes and parsed here to a full transcript.
+#[derive(Clone)]
+pub(crate) struct TranscriptData<F: Field> {
+    /// commitment to the batched FRI instances
+    pub batch_commit: Option<Vec<u8>>,
+    /// random combiner for a batch of instances
+    pub alpha: Option<F>,
+    /// commitments from all rounds, shape: [[u8; 32]; num_rounds]
+    pub round_commits: Vec<Vec<u8>>,
+    /// folding challenge from all rounds
+    pub round_chals: Vec<F>,
+    /// final constant poly
+    pub final_poly: F,
+    /// queried indices during the query phase
+    pub query_indices: Vec<usize>,
+}
+
+impl<F: Field> TranscriptData<F> {
+    /// Parse the transcript data
+    pub fn parse(config: &FriConfig, transcript: &[u8]) -> Self {
+        let mut arthur = config.io.to_arthur(&transcript);
+
+        let mut batch_commit = vec![0u8; 32];
+        let mut alpha = F::ZERO;
+        if config.num_batches > 1 {
+            batch_commit = arthur.next_bytes::<32>().unwrap().to_vec();
+            [alpha] = arthur.challenge_scalars().unwrap();
+        }
+
+        let num_rounds = config.num_rounds;
+        let domain_0_size = config.init_domain_size;
+
+        // merkle roots
+        let mut round_commits = Vec::with_capacity(num_rounds);
+        // random combiners to fold poly in each round
+        let mut round_chals = Vec::with_capacity(num_rounds);
+        for _ in 0..num_rounds {
+            round_commits.push(arthur.next_bytes::<32>().unwrap().to_vec());
+            let [beta]: [F; 1] = arthur.challenge_scalars().unwrap();
+            round_chals.push(beta);
+        }
+        let [final_poly]: [F; 1] = arthur.next_scalars().unwrap();
+
+        // verify proof-of-work grind
+        arthur
+            .challenge_pow::<Blake3PoW>(config.pow_bits as f64)
+            .unwrap();
+
+        let query_indices: Vec<usize> = (0..config.num_queries)
+            .map(|_| usize::from_le_bytes(arthur.challenge_bytes().unwrap()) % domain_0_size)
+            .collect();
+
+        TranscriptData {
+            batch_commit: Some(batch_commit),
+            alpha: Some(alpha),
+            round_commits,
+            round_chals,
+            final_poly,
+            query_indices,
+        }
+    }
+}
+
 /// A FRI-proof
 #[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize)]
 pub struct FriProof<F: Field> {
@@ -137,30 +208,6 @@ pub struct FriProof<F: Field> {
     pub query_proofs: Vec<QueryProof<F>>,
     /// Proof of correct batching, optional for batched FRI
     pub batching_proof: Option<Vec<BatchedColProof<F>>>,
-}
-
-impl<F: Field> FriProof<F> {
-    /// Returns all queried indices
-    pub fn queries(&self, config: &FriConfig) -> Vec<usize> {
-        // Simulate verifier's logic to derive all the queried indices
-        let mut arthur = config.io.to_arthur(&self.transcript);
-        if config.num_batches > 1 {
-            arthur.next_bytes::<32>().unwrap();
-            let [_alpha]: [F; 1] = arthur.challenge_scalars().unwrap();
-        }
-        let domain_0_size = config.init_domain_size;
-        for _ in 0..config.num_rounds {
-            arthur.next_bytes::<32>().unwrap();
-            let [_beta]: [F; 1] = arthur.challenge_scalars().unwrap();
-        }
-        let [_final_poly]: [F; 1] = arthur.next_scalars().unwrap();
-        arthur
-            .challenge_pow::<Blake3PoW>(config.pow_bits as f64)
-            .unwrap();
-        (0..config.num_queries)
-            .map(|_| usize::from_le_bytes(arthur.challenge_bytes().unwrap()) % domain_0_size)
-            .collect()
-    }
 }
 
 /// The query proof on the interleaved matrix.
@@ -454,8 +501,8 @@ pub fn batch_prove<F: FftField>(config: &FriConfig, evals: &Matrix<F>) -> FriPro
     let mut proof = prove_internal(&mut merlin, config, evals);
 
     // Update all the query opening proof on batched matrix to prove correct batching
-    let batching_proof = proof
-        .queries(config)
+    let batching_proof = TranscriptData::<F>::parse(config, &proof.transcript)
+        .query_indices
         .par_iter()
         .map(|&idx| BatchedColProof {
             query_col_evals: leaves[idx].clone(),
@@ -472,54 +519,34 @@ pub fn verify<F>(config: &FriConfig, proof: &FriProof<F>) -> bool
 where
     F: FftField,
 {
-    let mut arthur = config.io.to_arthur(&proof.transcript);
-    assert_eq!(proof.query_proofs.len(), config.num_queries);
-
-    let mut batch_root = vec![0u8; 32];
-    let mut alpha = F::ZERO;
-    if config.num_batches > 1 {
-        batch_root = arthur.next_bytes::<32>().unwrap().to_vec();
-        [alpha] = arthur.challenge_scalars().unwrap();
-    }
-
-    let num_rounds = config.num_rounds;
-    let domain_0_size = config.init_domain_size;
-
-    // merkle roots
-    let mut commits = Vec::with_capacity(num_rounds);
-    // random combiners to fold poly in each round
-    let mut betas = Vec::with_capacity(num_rounds);
-    for _ in 0..num_rounds {
-        commits.push(arthur.next_bytes::<32>().unwrap().to_vec());
-        let [beta]: [F; 1] = arthur.challenge_scalars().unwrap();
-        betas.push(beta);
-    }
-    let [final_poly]: [F; 1] = arthur.next_scalars().unwrap();
-
-    // verify proof-of-work grind
-    arthur
-        .challenge_pow::<Blake3PoW>(config.pow_bits as f64)
-        .unwrap();
-
-    let s_0_indices: Vec<usize> = (0..config.num_queries)
-        .map(|_| usize::from_le_bytes(arthur.challenge_bytes().unwrap()) % domain_0_size)
-        .collect();
+    // Parse messages being exchanged
+    let TranscriptData {
+        batch_commit,
+        alpha,
+        round_commits,
+        round_chals,
+        final_poly,
+        query_indices,
+    } = TranscriptData::parse(config, &proof.transcript);
 
     // Verify each query proof in parallel
-    let mut verified = s_0_indices
+    let mut verified = query_indices
         .par_iter()
         .zip(proof.query_proofs.par_iter())
         .all(|(&s_0_idx, query_proof)| {
-            query_proof.verify(config, &commits, &betas, s_0_idx, &final_poly)
+            query_proof.verify(config, &round_commits, &round_chals, s_0_idx, &final_poly)
         });
 
     // for batched FRI, verify the batching on queried columns
     if let Some(batching_proof) = &proof.batching_proof {
+        let batch_commit = batch_commit.unwrap_or(vec![]);
+        let alpha = alpha.unwrap_or(F::ONE);
+
         let alpha_powers: Vec<F> = successors(Some(F::ONE), |&prev| Some(prev * alpha))
             .take(config.num_batches)
             .collect();
 
-        verified &= s_0_indices
+        verified &= query_indices
             .par_iter()
             .zip(batching_proof.par_iter())
             .zip(proof.query_proofs.par_iter())
@@ -534,7 +561,7 @@ where
 
                 // check correct column opening
                 col_verified &= col_proof.opening_proof.verify(
-                    &batch_root,
+                    &batch_commit,
                     idx,
                     col_proof.query_col_evals.clone(),
                 );
