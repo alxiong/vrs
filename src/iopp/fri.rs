@@ -148,27 +148,75 @@ pub struct QueryProof<F: Field> {
     /// answering (sibling_value, mt_proof) for per-round query,
     /// each leaf contains (folded_value, sibling_value)
     /// in-order: large domain to smaller reduced domain
-    pub openings: Vec<(F, Path<F>)>,
+    pub opening_proof: Vec<(F, Path<F>)>,
 }
 
-impl<F: Field> QueryProof<F> {
-    /// Returns the number of rounds this query proof contains
-    pub fn num_rounds(&self) -> usize {
-        self.openings.len()
-    }
-    /// Returns the top-most initial domain size
-    pub fn init_domain_size(&self) -> usize {
-        assert!(!self.openings.is_empty());
-        self.openings[0].1.capacity() * 2
+impl<F: FftField> QueryProof<F> {
+    /// Veriyf the query proof
+    /// - `commits`: commitment/merkle_root of per round evaluations
+    /// - `betas`: all the beta combiner in each round
+    pub fn verify(
+        &self,
+        config: &FriConfig,
+        commits: &[Vec<u8>],
+        betas: &[F],
+        query_idx: usize,
+        final_poly: &F,
+    ) -> bool {
+        let elems: Vec<F> = Radix2EvaluationDomain::new(config.init_domain_size)
+            .unwrap()
+            .elements()
+            .collect();
+
+        let mut idx = query_idx;
+        let mut tree_size = config.init_domain_size / 2;
+        let mut folded = self.query_eval;
+
+        for (round, (sibling, mt_proof), root, beta) in
+            izip!(0..config.num_rounds, &self.opening_proof, commits, betas)
+        {
+            let sibling_idx = 1 - idx / tree_size;
+            let mut leaf = [folded; 2];
+            leaf[sibling_idx] = *sibling;
+
+            idx %= tree_size;
+            tree_size /= 2;
+            if !mt_proof.verify(root, idx, leaf.clone()) {
+                return false;
+            }
+
+            // Compute the following (same from commit phase logic):
+            // let sum = f_{i-1}(e_j) + f_{i-1}(-e_j), diff = f_{i-1}(e_j) - f_{i-1}(-e_j)
+            //   f_i(e'_j) = 1/2 * (sum + beta * diff / e_j)
+            // a key mapping relationship is that for a halving domains,
+            //   j-th element in i-th round is the j*2^i-th element in the original domain
+            let half = F::from(2u64).inverse().unwrap();
+            folded = half
+                * (leaf[0]
+                    + leaf[1]
+                    + *beta * (leaf[0] - leaf[1]) / elems[idx * 2usize.pow(round as u32)]);
+        }
+        // check final matching constant poly
+        folded == *final_poly
     }
 }
 
-/// Proving low-degree of a polynomial given its evaluation on D
-pub fn prove<F>(config: &FriConfig, evals: Evaluations<F, Radix2EvaluationDomain<F>>) -> FriProof<F>
-where
-    F: FftField,
-{
-    let mut merlin = config.io.to_merlin();
+/// Output from the `commit_phase()`
+pub struct CommitPhaseResult<F: Field> {
+    /// Committed oracle for each round (i.e. Merkle tree)
+    pub commits: Vec<SymbolMerkleTree<F>>,
+    /// Values being committed in each commit, shape: [[[F]; domain_i_size / 2]; num_rounds]
+    /// each leaf may contains multiple leaves (2 for now)
+    pub openings: Vec<Vec<Vec<F>>>,
+}
+
+/// The commit phase of the FRI protocol
+#[inline(always)]
+pub fn commit_phase<F: FftField>(
+    config: &FriConfig,
+    evals: Evaluations<F, Radix2EvaluationDomain<F>>,
+    merlin: &mut Merlin,
+) -> CommitPhaseResult<F> {
     let num_rounds = config.num_rounds;
     let elems: Vec<F> = evals.domain().elements().collect();
     let domain_0_size = config.init_domain_size;
@@ -194,7 +242,6 @@ where
         assert_eq!(mt.root().len(), 32);
         let [beta]: [F; 1] = merlin.challenge_scalars().unwrap();
 
-        // TODO: move this to a individual function and add tests for correctness
         // the original domain is D_{i-1} = (e_0, ..., e_{n-1}) from round i-1
         // each leaf at col j contains f_{i-1}(e_j) and f_{i-1}(-e_j)
         // the new folded domain is D_i = (e'_0, ... , e'_{n/2-1}) where e'_j = e_j^2
@@ -238,6 +285,63 @@ where
     assert!(folded.par_iter().all(|f| f == &final_poly));
     merlin.add_scalars(&[final_poly]).unwrap();
 
+    CommitPhaseResult {
+        commits: mts,
+        openings: mts_leaves,
+    }
+}
+
+/// Responding a single query in the query phase of FRI protocol, given the prover data `pd` from the `commit_phase()`
+#[inline(always)]
+pub fn answer_query<F: FftField>(
+    config: &FriConfig,
+    pd: &CommitPhaseResult<F>,
+    query_idx: usize,
+) -> QueryProof<F> {
+    // s_{i+1} = s_i^2 value mapping corresponds to the index mapping as follows:
+    // j-th element in i-th round is s_i, then s_{i+1} is the j%(n/2^{i+1})-th element in the next folded domain
+    // our merkle tree at round i has size n/2^i, where n is the original domain size
+    let opening_proof = pd
+        .commits
+        .iter()
+        .zip(pd.openings.iter())
+        .scan(
+            (query_idx, config.init_domain_size / 2),
+            |(idx, tree_size), (mt, leaves)| {
+                // the index (0/1) of the sibling inside the 2-element leaf
+                let sibling_idx = 1 - *idx / *tree_size;
+
+                *idx %= *tree_size;
+                *tree_size /= 2;
+                Some((leaves[*idx][sibling_idx], mt.generate_proof(*idx)))
+            },
+        )
+        .collect::<Vec<(F, Path<F>)>>();
+
+    let tree_0_size = config.init_domain_size / 2;
+    let query_eval = if query_idx < tree_0_size {
+        pd.openings[0][query_idx % tree_0_size][0]
+    } else {
+        pd.openings[0][query_idx % tree_0_size][1]
+    };
+
+    QueryProof {
+        query_eval,
+        opening_proof,
+    }
+}
+
+/// Proving low-degree of a polynomial given its evaluation on D
+pub fn prove<F>(config: &FriConfig, evals: Evaluations<F, Radix2EvaluationDomain<F>>) -> FriProof<F>
+where
+    F: FftField,
+{
+    let mut merlin = config.io.to_merlin();
+    let domain_0_size = config.init_domain_size;
+
+    // Commit phase
+    let pd = commit_phase(config, evals, &mut merlin);
+
     // Perform Proof-of-work grinding
     merlin
         .challenge_pow::<Blake3PoW>(config.pow_bits as f64)
@@ -249,32 +353,10 @@ where
         .map(|_| usize::from_le_bytes(merlin.challenge_bytes().unwrap()) % domain_0_size)
         .collect();
 
+    // for each query, generate the query proof
     let query_proofs = s_0_indices
         .into_par_iter()
-        .map(|s_0_idx| {
-            // s_{i+1} = s_i^2 value mapping corresponds to the index mapping as follows:
-            // j-th element in i-th round is s_i, then s_{i+1} is the j%(n/2^{i+1})-th element in the next folded domain
-            // our merkle tree at round i has size n/2^i, where n is the original domain size
-            let openings = mts
-                .iter()
-                .zip(mts_leaves.iter())
-                .scan(
-                    (s_0_idx, domain_0_size / 2),
-                    |(idx, tree_size), (mt, leaves)| {
-                        // the index (0/1) of the sibling inside the 2-element leaf
-                        let sibling_idx = 1 - *idx / *tree_size;
-
-                        *idx %= *tree_size;
-                        *tree_size /= 2;
-                        Some((leaves[*idx][sibling_idx], mt.generate_proof(*idx)))
-                    },
-                )
-                .collect::<Vec<(F, Path<F>)>>();
-            QueryProof {
-                query_eval: evals.evals[s_0_idx],
-                openings,
-            }
-        })
+        .map(|s_0_idx| answer_query(config, &pd, s_0_idx))
         .collect();
 
     FriProof {
@@ -292,10 +374,6 @@ where
     assert_eq!(proof.query_proofs.len(), config.num_queries);
     let num_rounds = config.num_rounds;
     let domain_0_size = config.init_domain_size;
-    let elems: Vec<F> = Radix2EvaluationDomain::new(domain_0_size)
-        .unwrap()
-        .elements()
-        .collect();
 
     // merkle roots
     let mut commits = Vec::with_capacity(num_rounds);
@@ -317,40 +395,12 @@ where
         .map(|_| usize::from_le_bytes(arthur.challenge_bytes().unwrap()) % domain_0_size)
         .collect();
 
+    // Verify each query proof in parallel
     s_0_indices
         .into_par_iter()
         .zip(proof.query_proofs.par_iter())
         .all(|(s_0_idx, query_proof)| {
-            let mut idx = s_0_idx;
-            let mut tree_size = domain_0_size / 2;
-            let mut folded = query_proof.query_eval;
-
-            for (round, (sibling, mt_proof), root, beta) in
-                izip!(0..num_rounds, &query_proof.openings, &commits, &betas)
-            {
-                let sibling_idx = 1 - idx / tree_size;
-                let mut leaf = [folded; 2];
-                leaf[sibling_idx] = *sibling;
-
-                idx %= tree_size;
-                tree_size /= 2;
-                if !mt_proof.verify(root, idx, leaf.clone()) {
-                    return false;
-                }
-
-                // Compute the following (same from commit phase logic):
-                // let sum = f_{i-1}(e_j) + f_{i-1}(-e_j), diff = f_{i-1}(e_j) - f_{i-1}(-e_j)
-                //   f_i(e'_j) = 1/2 * (sum + beta * diff / e_j)
-                // a key mapping relationship is that for a halving domains,
-                //   j-th element in i-th round is the j*2^i-th element in the original domain
-                let half = F::from(2u64).inverse().unwrap();
-                folded = half
-                    * (leaf[0]
-                        + leaf[1]
-                        + *beta * (leaf[0] - leaf[1]) / elems[idx * 2usize.pow(round as u32)]);
-            }
-            // check final matching constant poly
-            folded == final_poly
+            query_proof.verify(config, &commits, &betas, s_0_idx, &final_poly)
         })
 }
 
@@ -380,7 +430,7 @@ mod tests {
         assert!(super::verify(&config, &fri_proof));
 
         let mut bad_proof = fri_proof.clone();
-        bad_proof.query_proofs[0].openings[0].0 = Fr::rand(rng);
+        bad_proof.query_proofs[0].opening_proof[0].0 = Fr::rand(rng);
         assert!(!super::verify(&config, &bad_proof));
     }
 
