@@ -65,6 +65,13 @@ where
         pk: &Self::ProverKey,
         data: &Matrix<F>,
     ) -> Result<(Self::Commitment, Vec<VrsShare<F, Self>>), VrsError> {
+        let total_time = start_timer!(|| ark_std::format!(
+            "KzgNNT::compute shares (k={}, n={}, L={})",
+            data.width(),
+            pk.1.size,
+            data.height()
+        ));
+
         // 1. encode Lxk into Lxn matrix (row-wise FFT)
         let encode_time = start_timer!(|| "encode data");
         let encoded = Self::interleaved_rs_encode(data, &pk.1)?;
@@ -88,6 +95,7 @@ where
             })
             .collect();
         end_timer!(commit_time);
+        end_timer!(total_time);
         Ok((commits, shares))
     }
 

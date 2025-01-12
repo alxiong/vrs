@@ -12,6 +12,7 @@ use p3_maybe_rayon::prelude::{
 ///
 /// # struct contracts
 /// - `data.len() = width * height` at all time
+#[derive(Clone)]
 pub struct Matrix<F: Field> {
     data: Arc<Vec<F>>,
     width: usize,
@@ -71,6 +72,20 @@ impl<F: Field> Matrix<F> {
                 column.push(self.data.clone()[row * width + col].clone());
             }
             (col, column)
+        })
+    }
+
+    /// Returns a sequential column iterator
+    pub fn col(&self) -> impl Iterator<Item = Vec<F>> + '_ {
+        let width = self.width;
+        let height = self.height;
+
+        (0..width).into_iter().map(move |col| {
+            let mut column = Vec::with_capacity(height);
+            for row in 0..height {
+                column.push(self.data[row * width + col].clone());
+            }
+            column
         })
     }
 

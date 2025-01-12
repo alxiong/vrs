@@ -36,7 +36,7 @@ pub struct FriConfig {
     /// Batching number for batched FRI
     pub num_batches: usize,
     /// IOP transcript io pattern
-    io: IOPattern,
+    pub(crate) io: IOPattern,
 }
 
 impl FriConfig {
@@ -218,6 +218,40 @@ pub struct BatchedColProof<F: Field> {
     pub query_col_evals: Vec<F>,
     /// Merkle proof of each column
     pub opening_proof: Path<F>,
+}
+
+impl<F: Field> BatchedColProof<F> {
+    /// Verify the correct batching proof
+    /// - `commit`: commitment/merkle_root of the evaluation matrix
+    /// - `alpha`: random combiner to squash the matrix into a single eval row (i.e. single FRI instance)
+    /// - `query_eval`: the batched/combined evaluation at `query_idx` on batched instance
+    pub fn verify(
+        &self,
+        config: &FriConfig,
+        commit: &Vec<u8>,
+        alpha: &F,
+        query_eval: &F,
+        query_idx: usize,
+    ) -> bool {
+        let alpha_powers: Vec<F> = successors(Some(F::ONE), |&prev| Some(prev * alpha))
+            .take(config.num_batches)
+            .collect();
+
+        // check correct column batching via linear combination
+        let mut verified = alpha_powers
+            .par_iter()
+            .zip(self.query_col_evals.par_iter())
+            .map(|(&alpha_pow, eval)| alpha_pow * eval)
+            .sum::<F>()
+            == *query_eval;
+
+        // check correct column opening
+        verified &= self
+            .opening_proof
+            .verify(commit, query_idx, self.query_col_evals.clone());
+
+        verified
+    }
 }
 
 /// Proof for a single FRI query for all rounds
@@ -588,31 +622,12 @@ where
         let batch_commit = batch_commit.unwrap_or(vec![]);
         let alpha = alpha.unwrap_or(F::ONE);
 
-        let alpha_powers: Vec<F> = successors(Some(F::ONE), |&prev| Some(prev * alpha))
-            .take(config.num_batches)
-            .collect();
-
         verified &= query_indices
             .par_iter()
             .zip(batching_proofs.par_iter())
             .zip(proof.query_proofs.par_iter())
             .all(|((&idx, col_proof), query_proof)| {
-                // check correct column batching via linear combination
-                let mut col_verified = alpha_powers
-                    .par_iter()
-                    .zip(col_proof.query_col_evals.par_iter())
-                    .map(|(&alpha_pow, eval)| alpha_pow * eval)
-                    .sum::<F>()
-                    == query_proof.query_eval;
-
-                // check correct column opening
-                col_verified &= col_proof.opening_proof.verify(
-                    &batch_commit,
-                    idx,
-                    col_proof.query_col_evals.clone(),
-                );
-
-                col_verified
+                col_proof.verify(config, &batch_commit, &alpha, &query_proof.query_eval, idx)
             });
     }
     verified

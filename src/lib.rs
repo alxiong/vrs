@@ -19,6 +19,7 @@ use thiserror::Error;
 
 pub mod advz;
 pub mod bivariate;
+pub mod frida;
 pub mod gxz;
 pub mod iopp;
 pub mod matrix;
