@@ -207,7 +207,7 @@ pub struct FriProof<F: Field> {
     /// Query proofs for all queries
     pub query_proofs: Vec<QueryProof<F>>,
     /// Proof of correct batching, optional for batched FRI
-    pub batching_proof: Option<Vec<BatchedColProof<F>>>,
+    pub batching_proofs: Option<Vec<BatchedColProof<F>>>,
 }
 
 /// The query proof on the interleaved matrix.
@@ -417,15 +417,18 @@ where
     F: FftField,
 {
     let mut merlin = config.io.to_merlin();
-    prove_internal(&mut merlin, config, evals)
+    let (proof, _extra) = prove_internal(&mut merlin, config, evals, &[]);
+    proof
 }
 
 /// Core prover logic, shared between single-instance and batched prover
-fn prove_internal<F: FftField>(
+/// We support extra queries on the same oracles: copy over if they were already queried in FRI proof
+pub(crate) fn prove_internal<F: FftField>(
     merlin: &mut Merlin,
     config: &FriConfig,
     evals: Evaluations<F, Radix2EvaluationDomain<F>>,
-) -> FriProof<F> {
+    extra_query_indices: &[usize],
+) -> (FriProof<F>, Vec<QueryProof<F>>) {
     let domain_0_size = config.init_domain_size;
 
     // Commit phase
@@ -444,15 +447,30 @@ fn prove_internal<F: FftField>(
 
     // for each query, generate the query proof
     let query_proofs = s_0_indices
-        .into_par_iter()
-        .map(|s_0_idx| answer_query(config, &pd, s_0_idx))
+        .par_iter()
+        .map(|&s_0_idx| answer_query(config, &pd, s_0_idx))
+        .collect::<Vec<_>>();
+
+    // Producing more query proofs for extra query points
+    let extra_query_proofs = extra_query_indices
+        .par_iter()
+        .map(|&idx| {
+            if let Some(pos) = s_0_indices.par_iter().position_first(|&i| i == idx) {
+                query_proofs[pos].clone()
+            } else {
+                answer_query(config, &pd, idx)
+            }
+        })
         .collect();
 
-    FriProof {
-        transcript: merlin.transcript().to_owned(),
-        query_proofs,
-        batching_proof: None,
-    }
+    (
+        FriProof {
+            transcript: merlin.transcript().to_owned(),
+            query_proofs,
+            batching_proofs: None,
+        },
+        extra_query_proofs,
+    )
 }
 
 /// Batched FRI, receiving a matrix of evaluations (each row corresponds to evals of a separate polynomial)
@@ -460,6 +478,18 @@ fn prove_internal<F: FftField>(
 pub fn batch_prove<F: FftField>(config: &FriConfig, evals: &Matrix<F>) -> FriProof<F> {
     let mut merlin = config.io.to_merlin();
 
+    let (proof, _extra_query_proofs, _extra_batching_proofs) =
+        batch_prove_internal(&mut merlin, config, evals, &[]);
+    proof
+}
+
+/// Core logic of batched FRI, optionally accept querying extra indices, copy over if they were already queried in FRI proof
+pub(crate) fn batch_prove_internal<F: FftField>(
+    merlin: &mut Merlin,
+    config: &FriConfig,
+    evals: &Matrix<F>,
+    extra_query_indices: &[usize],
+) -> (FriProof<F>, Vec<QueryProof<F>>, Vec<BatchedColProof<F>>) {
     // first commit all batches column wise
     let leaves = evals.par_col().collect::<Vec<Vec<_>>>();
     let mt = SymbolMerkleTree::<F>::from_slice(&leaves);
@@ -498,20 +528,36 @@ pub fn batch_prove<F: FftField>(config: &FriConfig, evals: &Matrix<F>) -> FriPro
         batched_eval,
         Radix2EvaluationDomain::new(config.init_domain_size).unwrap(),
     );
-    let mut proof = prove_internal(&mut merlin, config, evals);
+    let (mut proof, extra_query_proofs) =
+        prove_internal(merlin, config, evals, extra_query_indices);
 
     // Update all the query opening proof on batched matrix to prove correct batching
-    let batching_proof = TranscriptData::<F>::parse(config, &proof.transcript)
-        .query_indices
+    let fri_query_indices = TranscriptData::<F>::parse(config, &proof.transcript).query_indices;
+    let batching_proofs = fri_query_indices
         .par_iter()
         .map(|&idx| BatchedColProof {
             query_col_evals: leaves[idx].clone(),
             opening_proof: mt.generate_proof(idx),
         })
-        .collect();
-    proof.batching_proof = Some(batching_proof);
+        .collect::<Vec<_>>();
+    proof.batching_proofs = Some(batching_proofs.clone());
 
-    proof
+    // producing correct batching proof for the extra query indices (if not included already)
+    let extra_batching_proofs = extra_query_indices
+        .par_iter()
+        .map(|&idx| {
+            if let Some(pos) = fri_query_indices.par_iter().position_first(|&i| i == idx) {
+                batching_proofs[pos].clone()
+            } else {
+                BatchedColProof {
+                    query_col_evals: leaves[idx].clone(),
+                    opening_proof: mt.generate_proof(idx),
+                }
+            }
+        })
+        .collect();
+
+    (proof, extra_query_proofs, extra_batching_proofs)
 }
 
 /// Verifying a FRI proof of low-degreeness
@@ -538,7 +584,7 @@ where
         });
 
     // for batched FRI, verify the batching on queried columns
-    if let Some(batching_proof) = &proof.batching_proof {
+    if let Some(batching_proofs) = &proof.batching_proofs {
         let batch_commit = batch_commit.unwrap_or(vec![]);
         let alpha = alpha.unwrap_or(F::ONE);
 
@@ -548,7 +594,7 @@ where
 
         verified &= query_indices
             .par_iter()
-            .zip(batching_proof.par_iter())
+            .zip(batching_proofs.par_iter())
             .zip(proof.query_proofs.par_iter())
             .all(|((&idx, col_proof), query_proof)| {
                 // check correct column batching via linear combination
@@ -606,9 +652,9 @@ mod tests {
         assert!(super::verify(&config, &fri_proof));
 
         let mut bad_proof = fri_proof.clone();
-        let mut bad_batching_proof = fri_proof.batching_proof.clone().unwrap();
+        let mut bad_batching_proof = fri_proof.batching_proofs.clone().unwrap();
         bad_batching_proof[0].query_col_evals[0] += Fr::rand(rng);
-        bad_proof.batching_proof = Some(bad_batching_proof);
+        bad_proof.batching_proofs = Some(bad_batching_proof);
         assert!(!super::verify(&config, &bad_proof));
     }
 
