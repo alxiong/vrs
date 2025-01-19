@@ -11,7 +11,7 @@ use ark_poly::{
 use ark_std::rand::{rngs::StdRng, SeedableRng};
 use jf_pcs::prelude::*;
 use p3_maybe_rayon::prelude::*;
-use vrs::{bivariate, pcs::bkzg::*};
+use vrs::{pcs::bkzg::*, poly::bivariate};
 
 use criterion::Criterion;
 

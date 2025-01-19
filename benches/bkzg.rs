@@ -12,7 +12,7 @@ use ark_std::{
 use criterion::Criterion;
 use itertools::Itertools;
 use jf_pcs::prelude::*;
-use vrs::{bivariate::DensePolynomial, pcs::bkzg::*};
+use vrs::{pcs::bkzg::*, poly::bivariate::DensePolynomial};
 
 /// a CryptoRng
 pub fn test_rng() -> StdRng {

@@ -5,8 +5,8 @@ use ark_poly::{univariate, DenseUVPolynomial, EvaluationDomain, Radix2Evaluation
 use p3_maybe_rayon::prelude::*;
 
 use crate::{
-    bivariate::DensePolynomial,
     pcs::bkzg::{BivariateProverParam, PartialEvalProof},
+    poly::bivariate::DensePolynomial,
 };
 
 /// Same as [`multi_partial_eval()`], with precomputed table from [`multi_partial_eval_precompute()`]

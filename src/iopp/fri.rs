@@ -6,7 +6,7 @@
 use ark_ff::{batch_inversion_and_mul, FftField, Field};
 use ark_poly::{EvaluationDomain, Evaluations, Radix2EvaluationDomain};
 use ark_serialize::*;
-use ark_std::iter::successors;
+use ark_std::{iter::successors, log2};
 use itertools::izip;
 use nimue::{plugins::ark::*, *};
 use nimue_pow::{blake3::Blake3PoW, PoWChallenge, PoWIOPattern};
@@ -98,7 +98,7 @@ impl FriConfig {
             io = FieldIOPattern::<F>::challenge_scalars(io, 1, "batch_alpha");
         }
         let init_domain_size = (msg_len * (1 << log_blowup)).next_power_of_two();
-        let num_rounds = init_domain_size.ilog2() as usize - log_blowup;
+        let num_rounds = log2(init_domain_size) as usize - log_blowup;
         for round in 0..num_rounds {
             io = io.absorb(32, &format!("root_{}", round));
             io = FieldIOPattern::<F>::challenge_scalars(io, 1, &format!("beta_{}", round));

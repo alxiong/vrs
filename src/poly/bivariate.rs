@@ -236,9 +236,6 @@ impl<F: Field + AdditiveGroup> DensePolynomial<F> {
                         .par_iter_mut()
                         .enumerate()
                         .for_each(|(idx, row)| row[cur_q_degree] = cur_q_coeff[idx]);
-                    // Help me finish this part, using the analogous logic as the previous case
-                    // but now the along the columns where self.coeffs are stored as row-wise matrix
-                    //
                     divisor.iter().enumerate().for_each(|(i, div_coeff)| {
                         remainder
                             .coeffs

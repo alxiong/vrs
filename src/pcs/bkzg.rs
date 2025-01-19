@@ -1,6 +1,6 @@
 //! Bivariate KZG, inspired from [PST13][https://eprint.iacr.org/2011/587]
 
-use crate::bivariate::DensePolynomial;
+use crate::poly::bivariate::DensePolynomial;
 use ark_ec::{
     pairing::{Pairing, PairingOutput},
     AffineRepr, CurveGroup, PrimeGroup, VariableBaseMSM,
@@ -10,7 +10,7 @@ use ark_poly::{univariate, DenseUVPolynomial, Polynomial};
 use ark_serialize::*;
 use ark_std::{
     borrow::Borrow,
-    env,
+    env, log2,
     marker::PhantomData,
     rand::{CryptoRng, RngCore},
     UniformRand,
@@ -87,10 +87,7 @@ impl<E: Pairing> PolynomialCommitmentScheme for BivariateKzgPCS<E> {
         // when t > log(Lk)/log(k), it is faster to compute smaller MSM in parallel
         // where L is deg_x+1, k is deg_y+1, for simplicity we ignore the +1, it's heuristic anyway
         let cm = match env::var("RAYON_NUM_THREADS") {
-            Ok(t)
-                if (t.parse::<usize>().unwrap() as f32)
-                    < (poly.degree() as f32).log2() / (poly.deg_y as f32).log2() =>
-            {
+            Ok(t) if (t.parse::<u32>().unwrap()) < log2(poly.degree()) / log2(poly.deg_y) => {
                 let bases = pk
                     .powers_of_g
                     .par_iter()
