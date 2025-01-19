@@ -1,8 +1,11 @@
 //! Bivariate KZG, inspired from [PST13][https://eprint.iacr.org/2011/587]
 
 use crate::bivariate::DensePolynomial;
-use ark_ec::{pairing::Pairing, AffineRepr, CurveGroup, Group, VariableBaseMSM};
-use ark_ff::{Field, One, Zero};
+use ark_ec::{
+    pairing::{Pairing, PairingOutput},
+    AffineRepr, CurveGroup, PrimeGroup, VariableBaseMSM,
+};
+use ark_ff::{Field, Zero};
 use ark_poly::{univariate, DenseUVPolynomial, Polynomial};
 use ark_serialize::*;
 use ark_std::{
@@ -175,7 +178,7 @@ impl<E: Pairing> PolynomialCommitmentScheme for BivariateKzgPCS<E> {
             vk.tau_y_h.into_group() - vk.h * y,
             vk.h.into_group(),
         ];
-        let verified = E::multi_pairing(&a, &b).0.is_one();
+        let verified = E::multi_pairing(&a, &b) == PairingOutput(E::TargetField::ONE);
         Ok(verified)
     }
 
@@ -282,9 +285,7 @@ impl<E: Pairing> BivariateKzgPCS<E> {
             let verified = E::multi_pairing(
                 &[proof.into_group(), partial_eval_in_exp - commitment],
                 &[vk.tau_x_h.into_group() - vk.h * point, vk.h.into_group()],
-            )
-            .0
-            .is_one();
+            ) == PairingOutput(E::TargetField::ONE);
             Ok(verified)
         } else {
             let partial_eval_in_exp = <E::G1 as VariableBaseMSM>::msm(
@@ -296,9 +297,7 @@ impl<E: Pairing> BivariateKzgPCS<E> {
             let verified = E::multi_pairing(
                 &[proof.into_group(), partial_eval_in_exp - commitment],
                 &[vk.tau_y_h.into_group() - vk.h * point, vk.h.into_group()],
-            )
-            .0
-            .is_one();
+            ) == PairingOutput(E::TargetField::ONE);
             Ok(verified)
         }
     }

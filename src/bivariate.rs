@@ -1,6 +1,6 @@
 //! Bivariate polynomial compatible with arkwork's trait and backend
 
-use ark_ff::{Field, Zero};
+use ark_ff::{AdditiveGroup, Field, Zero};
 use ark_poly::{univariate, DenseUVPolynomial, Polynomial};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::{
@@ -72,7 +72,7 @@ impl<F: Field> Polynomial<F> for DensePolynomial<F> {
     }
 }
 
-impl<F: Field> DensePolynomial<F> {
+impl<F: Field + AdditiveGroup> DensePolynomial<F> {
     /// constructor with check
     pub fn new(coeffs: Vec<Vec<F>>, deg_x: usize, deg_y: usize) -> Self {
         assert!(

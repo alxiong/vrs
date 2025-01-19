@@ -9,7 +9,10 @@ use crate::{
     matrix::Matrix, multi_evals::univariate::multi_eval, VerifiableReedSolomon, VrsError, VrsShare,
 };
 use ark_crypto_primitives::crh::sha256::{digest::Digest, Sha256};
-use ark_ec::{pairing::Pairing, AffineRepr, VariableBaseMSM};
+use ark_ec::{
+    pairing::{Pairing, PairingOutput},
+    AffineRepr, VariableBaseMSM,
+};
 use ark_ff::{FftField, One, PrimeField};
 use ark_poly::{EvaluationDomain, Radix2EvaluationDomain};
 use ark_serialize::CanonicalSerialize;
@@ -167,9 +170,7 @@ where
                 vk.0.beta_h.into_group() - vk.0.h * point,
                 vk.0.h.into_group(),
             ],
-        )
-        .0
-        .is_one();
+        ) == PairingOutput(E::TargetField::one());
 
         // NOTE: this is the non-batched verification with 2L Pairings
         // let verified = comm

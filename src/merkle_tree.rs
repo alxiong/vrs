@@ -58,7 +58,7 @@ pub struct SymbolMerkleTree<F: Field> {
 
 impl<F: Field> SymbolMerkleTree<F> {
     /// Returns a new merkle tree. `leaves.len()` should be power of two.
-    pub fn new<L: Borrow<[F]>>(leaves: impl IntoIterator<Item = L>) -> Self {
+    pub fn new<L: AsRef<[F]> + Send>(leaves: impl IntoIterator<Item = L>) -> Self {
         let inner = ark_mt::MerkleTree::<SymbolMerkleTreeParams<F>>::new(&(), &(), leaves).unwrap();
         Self { inner }
     }
