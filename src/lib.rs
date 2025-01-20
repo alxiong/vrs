@@ -19,7 +19,7 @@ use thiserror::Error;
 
 pub mod advz;
 pub mod frida;
-// pub mod gxz;
+pub mod gxz;
 pub mod iopp;
 pub mod matrix;
 pub mod merkle_tree;
