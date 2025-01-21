@@ -760,7 +760,7 @@ checksum = "d75a2a4b1b190afb6f5425f10f6a8f959d2ea0b9c2b1d79553551850539e4674"
 [[package]]
 name = "jf-pcs"
 version = "0.1.0"
-source = "git+https://github.com/EspressoSystems/jellyfish?branch=pcs-ark-0.5#73599916e5da1d42c131cfaa5b54b9d126861823"
+source = "git+https://github.com/EspressoSystems/jellyfish?branch=pcs-ark-0.5#a7a40769123b0d830690f95b16b24be8753bba3e"
 dependencies = [
  "ark-ec",
  "ark-ff",
@@ -778,7 +778,7 @@ dependencies = [
 [[package]]
 name = "jf-utils"
 version = "0.4.4"
-source = "git+https://github.com/EspressoSystems/jellyfish?branch=pcs-ark-0.5#73599916e5da1d42c131cfaa5b54b9d126861823"
+source = "git+https://github.com/EspressoSystems/jellyfish?branch=pcs-ark-0.5#a7a40769123b0d830690f95b16b24be8753bba3e"
 dependencies = [
  "ark-ec",
  "ark-ed-on-bls12-377",
