@@ -34,8 +34,8 @@ impl<F: FftField> VerifiableReedSolomon<F> for FridaVRS<F> {
     type Proof = FridaProof<F>;
 
     fn setup<R>(
-        max_row_degree: usize,
-        max_col_degree: usize,
+        max_y_degree: usize,
+        max_x_degree: usize,
         _rng: &mut R,
     ) -> Result<Self::PublicParams, VrsError>
     where
@@ -43,27 +43,27 @@ impl<F: FftField> VerifiableReedSolomon<F> for FridaVRS<F> {
     {
         let log_blowup = 2; // P26 of FRIDA choose blowup = 4
         let fri_config = FriConfig::new_conjectured::<F>(
-            max_row_degree + 1,
+            max_y_degree + 1,
             log_blowup,
             None,
             None,
-            Some(max_col_degree + 1),
+            Some(max_x_degree + 1),
         );
         Ok(fri_config)
     }
 
     fn preprocess(
         pp: &Self::PublicParams,
-        row_degree: usize,
-        col_degree: usize,
+        y_degree: usize,
+        x_degree: usize,
         eval_domain: &Radix2EvaluationDomain<F>,
     ) -> Result<(Self::ProverKey, Self::VerifierKey), VrsError> {
         assert_eq!(
             (eval_domain.size as usize) << (pp.log_blowup - 1),
             pp.init_domain_size
         );
-        assert_eq!(pp.msg_len, row_degree + 1);
-        assert_eq!(pp.num_batches, col_degree + 1);
+        assert_eq!(pp.msg_len, y_degree + 1);
+        assert_eq!(pp.num_batches, x_degree + 1);
 
         Ok(((pp.clone(), eval_domain.to_owned()), pp.clone()))
     }

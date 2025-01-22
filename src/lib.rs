@@ -44,12 +44,11 @@ pub trait VerifiableReedSolomon<F: FftField>: Sized {
     /// Proof for a valid share w.r.t the commitment
     type Proof: Clone + Debug;
 
-    // TODO: (alex) name max_row_dgree is little confusing, change it
     /// Construct public parameters given the degree upper bounds on X and Y dimension
-    /// max_row_degree = width-1, max_col_degree = height - 1
+    /// max_y_degree = width-1, max_x_degree = height - 1
     fn setup<R>(
-        max_row_degree: usize,
-        max_col_degree: usize,
+        max_y_degree: usize,
+        max_x_degree: usize,
         rng: &mut R,
     ) -> Result<Self::PublicParams, VrsError>
     where
@@ -60,8 +59,8 @@ pub trait VerifiableReedSolomon<F: FftField>: Sized {
     /// - instance-independent precomputation
     fn preprocess(
         pp: &Self::PublicParams,
-        row_degree: usize,
-        col_degree: usize,
+        y_degree: usize,
+        x_degree: usize,
         eval_domain: &Radix2EvaluationDomain<F>,
     ) -> Result<(Self::ProverKey, Self::VerifierKey), VrsError>;
 

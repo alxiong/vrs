@@ -47,23 +47,23 @@ where
     type Proof = Vec<UnivariateKzgProof<E>>;
 
     fn setup<R>(
-        max_row_degree: usize,
-        _max_col_degree: usize,
+        max_y_degree: usize,
+        _max_x_degree: usize,
         rng: &mut R,
     ) -> Result<Self::PublicParams, VrsError>
     where
         R: RngCore + CryptoRng,
     {
-        UnivariateUniversalParams::gen_srs_for_testing(rng, max_row_degree).map_err(VrsError::from)
+        UnivariateUniversalParams::gen_srs_for_testing(rng, max_y_degree).map_err(VrsError::from)
     }
 
     fn preprocess(
         pp: &Self::PublicParams,
-        row_degree: usize,
-        _col_degree: usize,
+        y_degree: usize,
+        _x_degree: usize,
         eval_domain: &Radix2EvaluationDomain<F>,
     ) -> Result<(Self::ProverKey, Self::VerifierKey), VrsError> {
-        let (pk, vk) = UnivariateUniversalParams::trim(pp, row_degree).map_err(VrsError::from)?;
+        let (pk, vk) = UnivariateUniversalParams::trim(pp, y_degree).map_err(VrsError::from)?;
         Ok((
             (pk, eval_domain.to_owned()),
             (vk, eval_domain.size as usize),
