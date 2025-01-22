@@ -8,6 +8,15 @@ Install [Rust](https://www.rust-lang.org/) and [`just` runner](https://just.syst
 
 ``` sh
 cargo test --release
+
+# run benchmark across VRS schemes
+just bench 
+# only bench VID regimes
+just bench vid
+# only bench DAS regimes
+just bench das
+
+# More granular benchmarks for low-level building blocks
 cargo bench
 ```
 

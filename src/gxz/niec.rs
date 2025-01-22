@@ -36,6 +36,7 @@ pub struct ConsolidationConfig<F: FftField> {
 impl<F: FftField> ConsolidationConfig<F> {
     /// construct a new config
     pub fn new(num_vars: usize, domain_size: usize, step_size: usize) -> Self {
+        // TODO: (alex) lift this restriction
         assert!(
             num_vars % step_size == 0,
             "nv should be a multiple of step_size"

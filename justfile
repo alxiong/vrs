@@ -1,11 +1,7 @@
 default:
     just --list
 
-benchmark:
-    @echo "Benchmarking ..."
-    cargo bench
-    @echo "Done!"
+# Benchmark VID or DAS, run `just bench [vid|das]`
+bench *args:
+    cargo run --bin bench --release -- {{args}}
 
-# Run a test named "tmp"
-tmp:
-    cargo test tmp -- --nocapture

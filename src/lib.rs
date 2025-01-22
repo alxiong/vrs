@@ -9,6 +9,7 @@
 
 use ark_ff::FftField;
 use ark_poly::{EvaluationDomain, Radix2EvaluationDomain};
+use ark_serialize::CanonicalSerialize;
 use ark_std::{
     fmt::Debug,
     rand::{CryptoRng, RngCore},
@@ -40,9 +41,9 @@ pub trait VerifiableReedSolomon<F: FftField>: Sized {
     /// Verifier key for nodes/replicas to verify their opening proofs
     type VerifierKey: Clone + Debug;
     /// Commitment to the data
-    type Commitment: Clone + Debug;
+    type Commitment: Clone + Debug + CanonicalSerialize;
     /// Proof for a valid share w.r.t the commitment
-    type Proof: Clone + Debug;
+    type Proof: Clone + Debug + CanonicalSerialize;
 
     /// Construct public parameters given the degree upper bounds on X and Y dimension
     /// max_y_degree = width-1, max_x_degree = height - 1
