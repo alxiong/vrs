@@ -9,9 +9,7 @@ use crate::{
 };
 use ark_crypto_primitives::crh::sha256::{digest::Digest, Sha256};
 use ark_ff::{FftField, Field};
-use ark_poly::{
-    univariate, DenseUVPolynomial, EvaluationDomain, Polynomial, Radix2EvaluationDomain,
-};
+use ark_poly::{univariate, DenseUVPolynomial, Polynomial, Radix2EvaluationDomain};
 use ark_serialize::*;
 use ark_std::{
     end_timer,
@@ -281,6 +279,7 @@ mod tests {
 
     use super::*;
     use crate::test_utils::test_rng;
+    use ark_poly::EvaluationDomain;
     use ark_std::UniformRand;
     use jf_pcs::prelude::MultilinearKzgPCS;
 

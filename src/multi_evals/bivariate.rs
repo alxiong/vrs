@@ -9,11 +9,15 @@ use crate::{
     poly::bivariate::DensePolynomial,
 };
 
+/// Precomputed table for amortized MultiPartialEval proof generation
+#[allow(type_alias_bounds)]
+pub type PrecomputeTable<E: Pairing> = Vec<Vec<E::G1Affine>>;
+
 /// Same as [`multi_partial_eval()`], with precomputed table from [`multi_partial_eval_precompute()`]
 pub fn multi_partial_eval_with_table<E: Pairing>(
     poly: &DensePolynomial<E::ScalarField>,
     domain: &Radix2EvaluationDomain<E::ScalarField>,
-    table: &[Vec<E::G1Affine>],
+    table: &PrecomputeTable<E>,
 ) -> (
     Vec<PartialEvalProof<E>>,
     Vec<univariate::DensePolynomial<E::ScalarField>>,
@@ -106,7 +110,7 @@ pub fn multi_partial_eval<E: Pairing>(
 pub fn multi_partial_eval_precompute<E: Pairing>(
     pk: &BivariateProverParam<E>,
     domain: &Radix2EvaluationDomain<E::ScalarField>,
-) -> Vec<Vec<E::G1Affine>> {
+) -> PrecomputeTable<E> {
     pk.powers_of_g
         .par_iter()
         .map(|row| {

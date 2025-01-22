@@ -2,5 +2,5 @@
 
 pub mod niec;
 pub mod transparent;
-// pub mod trusted;
+pub mod trusted;
 pub mod twin;
