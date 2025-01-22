@@ -204,7 +204,7 @@ pub fn verify<F: FftField>(
     pp: &ConsolidationConfig<F>,
     idx: usize,
     eval: &F,
-    consolidated_point: &Point<F>,
+    consolidated_point: &[F],
     proof: &ConsolidationProof<F>,
 ) -> bool {
     assert_eq!(proof.round_polys.len(), pp.nv / pp.s);
@@ -356,7 +356,7 @@ mod tests {
 
         let nv = 12;
         let k = 1 << nv;
-        let poly = DensePolynomial::<Fr>::rand(k, rng);
+        let poly = DensePolynomial::<Fr>::rand(k - 1, rng);
 
         let domain_size = 1 << (nv + 1);
         let domain = Radix2EvaluationDomain::<Fr>::new(domain_size).unwrap();

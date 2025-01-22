@@ -319,6 +319,7 @@ pub struct BivariateProverParam<E: Pairing> {
 }
 
 /// Verifier key for proof verification
+#[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize)]
 pub struct BivariateVerifierParam<E: Pairing> {
     /// G1 generator
     pub g: E::G1Affine,
@@ -339,6 +340,10 @@ pub struct BivariateVerifierParam<E: Pairing> {
 impl<E: Pairing> StructuredReferenceString for BivariateKzgSRS<E> {
     type ProverParam = BivariateProverParam<E>;
     type VerifierParam = BivariateVerifierParam<E>;
+
+    fn supported_degree(&self) -> usize {
+        (self.powers_of_g.len() - 1) * (self.powers_of_g[0].len() - 1)
+    }
 
     // NOTE: the upstream trait didn't consider multivariate degrees,
     // for now, use a hacky trick, treat `supported_degree` as 2*u32 values

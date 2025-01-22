@@ -89,11 +89,6 @@ impl<F: Field> Matrix<F> {
         })
     }
 
-    /// Returns a parallel row iterator
-    pub fn par_row(&self) -> impl ParallelIterator<Item = &[F]> {
-        self.data.par_chunks(self.width)
-    }
-
     /// Returns a parallel column iterator
     pub fn par_col(&self) -> impl ParallelIterator<Item = Vec<F>> + '_ {
         let width = self.width;
@@ -105,6 +100,23 @@ impl<F: Field> Matrix<F> {
                 column.push(self.data.clone()[row * width + col].clone());
             }
             column
+        })
+    }
+
+    /// Returns a parallel row iterator
+    pub fn par_row(&self) -> impl ParallelIterator<Item = &[F]> {
+        self.data.par_chunks(self.width)
+    }
+
+    /// Returns an owned parallel row iterator
+    pub fn into_par_row(&self) -> impl ParallelIterator<Item = Vec<F>> {
+        let data = self.data.clone();
+        let width = self.width;
+
+        (0..self.height).into_par_iter().map(move |row_idx| {
+            let start = row_idx * width;
+            let end = start + width;
+            data[start..end].to_vec()
         })
     }
 
