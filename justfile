@@ -5,3 +5,6 @@ default:
 bench *args:
     cargo run --bin bench --release -- {{args}}
 
+# Print trace of certain tests
+trace *test:
+    cargo test --release {{test}} --features print-trace -- --nocapture

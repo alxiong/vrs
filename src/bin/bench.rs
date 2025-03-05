@@ -132,7 +132,7 @@ fn bench_helper<F: FftField, S: VerifiableReedSolomon<F>>(
 
     let mut pp = S::setup(max_y_degree, max_x_degree, rng).unwrap();
 
-    println!("l, k, n, prover (ms), communication (byte)");
+    println!("l, k, n, prover (ms), communication (byte), verifier (ms)");
     for (log_l, log_k) in log_l_choices
         .into_iter()
         .cartesian_product(log_k_choices.into_iter())
@@ -151,7 +151,7 @@ fn bench_helper<F: FftField, S: VerifiableReedSolomon<F>>(
         // fixed RS rate of 1/2
         let domain = Radix2EvaluationDomain::new(2 * k).unwrap();
 
-        let (pk, _vk) = S::preprocess(&pp, k - 1, l - 1, &domain).unwrap();
+        let (pk, vk) = S::preprocess(&pp, k - 1, l - 1, &domain).unwrap();
 
         let data = (0..k * l).map(|_| F::rand(rng)).collect();
         let data = Matrix::new(data, k, l).unwrap();
@@ -160,6 +160,10 @@ fn bench_helper<F: FftField, S: VerifiableReedSolomon<F>>(
         let start = Instant::now();
         let (cm, shares) = S::compute_shares(&pk, &data).unwrap();
         let total_prepare_time = start.elapsed().as_millis();
+
+        let start = Instant::now();
+        assert!(S::verify_share(&vk, &cm, 0, &shares[0]).unwrap());
+        let verifier_time = start.elapsed().as_millis();
 
         let start = Instant::now();
         let _ = S::interleaved_rs_encode(&data, &domain).unwrap();
@@ -172,8 +176,8 @@ fn bench_helper<F: FftField, S: VerifiableReedSolomon<F>>(
             shares[0].proof.serialized_size(Compress::No) + cm.serialized_size(Compress::No);
 
         println!(
-            "{}, {}, {}, {}, {}",
-            l, k, domain.size, prover_time, communication
+            "{}, {}, {}, {}, {}, {}",
+            l, k, domain.size, prover_time, communication, verifier_time
         );
     }
 }
