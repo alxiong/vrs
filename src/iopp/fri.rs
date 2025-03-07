@@ -285,6 +285,7 @@ impl<F: FftField> QueryProof<F> {
         let mut idx = query_idx;
         let mut tree_size = config.init_domain_size / 2;
         let mut folded = self.query_eval;
+        let half = F::from(2u64).inverse().unwrap();
 
         for (round, (sibling, mt_proof), root, beta) in
             izip!(0..config.num_rounds, &self.opening_proof, commits, betas)
@@ -304,7 +305,6 @@ impl<F: FftField> QueryProof<F> {
             //   f_i(e'_j) = 1/2 * (sum + beta * diff / e_j)
             // a key mapping relationship is that for a halving domains,
             //   j-th element in i-th round is the j*2^i-th element in the original domain
-            let half = F::from(2u64).inverse().unwrap();
             folded = half
                 * (leaf[0]
                     + leaf[1]

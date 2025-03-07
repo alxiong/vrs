@@ -87,6 +87,13 @@ fn bench_vid() {
     println!("\n🔔 PedersenNNT");
     bench_helper::<Fr, PedersenNntVRS<G1Projective>>(&log_l_choices, &log_k_choices, None);
 
+    println!("\n🔔 Gxz + PST");
+    bench_helper::<Fr, GxzVRS<Fr, MultilinearKzgPCS<Bn254>>>(
+        &log_l_choices,
+        &log_k_choices,
+        Some(ExtraOpt::gxz()),
+    );
+
     println!("\n🔔 BkzgGxz");
     bench_helper::<Fr, BkzgGxzVRS<Bn254>>(&log_l_choices, &log_k_choices, None);
 }
