@@ -84,7 +84,7 @@ impl<F: FftField> VerifiableReedSolomon<F> for FridaVRS<F> {
         ));
         let init_domain_size = pk.0.init_domain_size;
 
-        // 1. encode kxL into nxL matrix (row-wise FFT)
+        // 1. encode Lxk into Lxn matrix (row-wise FFT)
         let encode_time = start_timer!(|| "encode data (and prepare FRI evals)");
         let evals = if init_domain_size == pk.1.size as usize {
             Self::interleaved_rs_encode(data, &pk.1)?
@@ -105,7 +105,7 @@ impl<F: FftField> VerifiableReedSolomon<F> for FridaVRS<F> {
 
         // 3. finally, assemble all shares
         let shares = evals
-            .col()
+            .col_iter()
             .step_by(init_domain_size / pk.1.size as usize)
             .zip(
                 extra_query_proofs

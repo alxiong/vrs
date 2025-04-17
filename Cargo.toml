@@ -20,6 +20,7 @@ nimue = { git = "https://github.com/arkworks-rs/nimue", rev = "857289be31eef04ae
 nimue-pow = { git = "https://github.com/arkworks-rs/nimue", rev = "857289be31eef04ae2ca8bf5346396a2d4f83620", features = ["parallel"] }
 p3-maybe-rayon = "0.2"
 thiserror = "2"
+rand_chacha = "0.3.1"
 
 [dev-dependencies]
 criterion = "0.5.1"

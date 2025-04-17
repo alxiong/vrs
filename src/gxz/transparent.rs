@@ -91,7 +91,7 @@ where
         let nv = nv_x + nv_y;
 
         // NOTE: hardcode a step size of 2, adjustable.
-        let config = ConsolidationConfig::new(nv_y, domain.size as usize, 2);
+        let config = ConsolidationConfig::new(nv_y, domain.size as usize, 4);
         let (pcs_pk, pcs_vk) = <PCS::SRS as StructuredReferenceString>::trim(&pp, nv)?;
 
         let mut io = IOPattern::<DefaultHash>::new("GxzVRS")
@@ -171,7 +171,7 @@ where
         // prepare all VRS share
         let transcript = merlin.transcript().to_vec();
         let shares = encoded
-            .col()
+            .col_iter()
             .zip(consolidation_proofs.into_iter())
             .enumerate()
             .map(|(j, (data, consolidation_proof))| {

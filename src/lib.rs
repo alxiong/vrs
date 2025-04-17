@@ -31,6 +31,7 @@ pub mod peer_das;
 pub mod poly;
 #[cfg(test)]
 pub mod test_utils;
+pub mod zoda;
 
 /// Interface for a verifiable (interleaved) Reed-Solomon scheme.
 pub trait VerifiableReedSolomon<F: FftField>: Sized {

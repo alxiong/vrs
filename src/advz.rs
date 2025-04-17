@@ -99,7 +99,7 @@ where
             pk.height
         ));
 
-        // 1. encode kxL into nxL matrix (row-wise FFT)
+        // 1. encode Lxk into Lxn matrix (row-wise FFT)
         let encode_time = start_timer!(|| "encode data");
         let encoded = Self::interleaved_rs_encode(data, &pk.domain)?;
         end_timer!(encode_time);
