@@ -36,8 +36,9 @@ _note: we only support `arkworks` backends for now, `zkcrypto` and `plonky3` sup
 - `fri`: FRI protocol (with grinding)
   - parameter selection suggested by [BT'24](https://eprint.iacr.org/2024/1161), flexible 80/100-bit security based on provable or conjectured soundness
 - `frida`: VRS scheme in [FRIDA](https://eprint.iacr.org/2024/248) for DAS
+- `zoda`: based on [ZODA](https://eprint.iacr.org/2025/034) for DAS 
 
 ## Benchmarks
 
-View all the benchmark codes in [`./benches`](./benches) and some early results in [`./BENCH.md`](./BENCH.md)
+View all the benchmark codes in [`./benches`](./benches) and some early results in [`./BENCH.md`](./BENCH.md) and in [this hackmd post](https://hackmd.io/@alxiong/vrs-bench).
     
