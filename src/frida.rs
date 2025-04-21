@@ -58,10 +58,7 @@ impl<F: FftField> VerifiableReedSolomon<F> for FridaVRS<F> {
         x_degree: usize,
         eval_domain: &Radix2EvaluationDomain<F>,
     ) -> Result<(Self::ProverKey, Self::VerifierKey), VrsError> {
-        assert_eq!(
-            (eval_domain.size as usize) << (pp.log_blowup - 1),
-            pp.init_domain_size
-        );
+        assert_eq!(eval_domain.size as usize, pp.init_domain_size);
         assert_eq!(pp.msg_len, y_degree + 1);
         assert_eq!(pp.num_batches, x_degree + 1);
 
@@ -188,7 +185,7 @@ mod tests {
         let rng = &mut test_rng();
         let k = 2usize.pow(10);
         let l = 8;
-        let n = 2usize.pow(11);
+        let n = 2usize.pow(12);
 
         let pp = FridaVRS::<Fr>::setup(k - 1, l - 1, rng).unwrap();
         let domain = Radix2EvaluationDomain::<Fr>::new(n).unwrap();

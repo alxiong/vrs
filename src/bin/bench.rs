@@ -1,7 +1,7 @@
 use std::{env, time::Instant};
 
 use ark_bn254::{Bn254, Fr, G1Projective};
-use ark_ff::FftField;
+use ark_ff::{FftField, UniformRand};
 use ark_poly::{EvaluationDomain, Radix2EvaluationDomain};
 use ark_serialize::*;
 use ark_std::rand::{rngs::StdRng, SeedableRng};
@@ -27,6 +27,7 @@ fn main() {
         2 => match args[1].as_str() {
             "vid" => bench_vid(),
             "das" => bench_das(),
+            "test" => bench_test(),
             _ => {
                 eprintln!("Unknown option: {}", args[1]);
                 std::process::exit(1);
@@ -37,6 +38,45 @@ fn main() {
             std::process::exit(1);
         },
     }
+}
+
+// handy temporary bench
+fn bench_test() {
+    let rng = &mut StdRng::from_seed([42; 32]);
+    let k = 2usize.pow(12);
+    let l = 2usize.pow(8);
+    let n = 2usize.pow(14);
+
+    // let pp = AdvzVRS::<Bn254>::setup(k - 1, l - 1, rng).unwrap();
+    let pp = FridaVRS::<Fr>::setup(k - 1, l - 1, rng).unwrap();
+    let domain = Radix2EvaluationDomain::new(n).unwrap();
+    // let (pk, _vk) = AdvzVRS::preprocess(&pp, k - 1, l - 1, &domain).unwrap();
+    let (pk, _vk) = FridaVRS::preprocess(&pp, k - 1, l - 1, &domain).unwrap();
+
+    let data = (0..k * l).map(|_| Fr::rand(rng)).collect();
+    let data = Matrix::new(data, k, l).unwrap();
+
+    let start = Instant::now();
+    // let (cm, shares) = AdvzVRS::compute_shares(&pk, &data).unwrap();
+    let (cm, shares) = FridaVRS::compute_shares(&pk, &data).unwrap();
+    let total_prepare_time = start.elapsed().as_millis();
+
+    // let start = Instant::now();
+    // let _ = FridaVRS::<Fr>::interleaved_rs_encode(&data, &domain).unwrap();
+    // let encode_time = start.elapsed().as_millis();
+
+    // let prover_time = total_prepare_time - encode_time;
+    let prover_time = total_prepare_time;
+
+    // Communication consists of commitment size and opening proof per replica/share
+    let communication =
+        shares[0].proof.serialized_size(Compress::No) + cm.serialized_size(Compress::No);
+
+    println!("l, k, n, prover (ms), communication (byte)");
+    println!(
+        "{}, {}, {}, {}, {}",
+        l, k, domain.size, prover_time, communication
+    );
 }
 
 fn bench_das() {
