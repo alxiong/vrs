@@ -64,6 +64,10 @@ where
     type Commitment = PCS::Commitment;
     type Proof = GxzProof<F, PCS>;
 
+    fn name() -> &'static str {
+        "Conda"
+    }
+
     fn setup<R>(
         max_width: usize,
         max_height: usize,

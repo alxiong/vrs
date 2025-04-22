@@ -49,6 +49,10 @@ where
     type Commitment = E::G1Affine;
     type Proof = PartialEvalProof<E>;
 
+    fn name() -> &'static str {
+        "bkzgGxz"
+    }
+
     fn setup<R>(
         max_width: usize,
         max_height: usize,

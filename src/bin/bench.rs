@@ -15,6 +15,7 @@ use vrs::{
     matrix::Matrix,
     nnt::{kzg::KzgNntVRS, pedersen::PedersenNntVRS},
     peer_das::PeerDasVRS,
+    zoda::ZodaVRS,
     VerifiableReedSolomon,
 };
 
@@ -45,11 +46,8 @@ fn main() {
 
 // only test frida and ours
 fn bench_ndss_base() {
-    let rng = &mut StdRng::from_seed([42; 32]);
-    let blowup = 4;
-
-    let mut frida_table = Table::new();
-    frida_table.add_row(row![
+    let header = row![
+        "Scheme",
         "N",
         "l",
         "k",
@@ -59,51 +57,81 @@ fn bench_ndss_base() {
         "per-node overhead. (MB)",
         "per-node (MB)",
         "verifier (ms)"
-    ]);
+    ];
+
+    let mut frida_table = Table::new();
+    frida_table.add_row(header.clone());
+    let mut conda_pst_table = Table::new();
+    conda_pst_table.add_row(header);
 
     for num_nodes in [1024, 2048, 4096] {
+        // for num_nodes in [1024] {
         // size means number of fields, not in bytes
         for block_log_size in [19, 20, 21, 22] {
+            // for block_log_size in [19] {
             let (log_k, log_l) = frida_shape_heuristic(block_log_size);
-            let k = 1 << log_k;
-            let l = 1 << log_l;
-            let n = k * blowup;
+            bench_ndss_helper::<FridaVRS<Fr>>(&mut frida_table, num_nodes, log_k, log_l);
 
-            let pp = FridaVRS::<Fr>::setup(k, l, rng).unwrap();
-            let domain = Radix2EvaluationDomain::<Fr>::new(n).unwrap();
-            let (pk, vk) = FridaVRS::preprocess(&pp, k, l, &domain).unwrap();
-            let data = Matrix::rand(rng, k, l);
-
-            let start = Instant::now();
-            let (cm, shares) = FridaVRS::compute_shares(&pk, &data).unwrap();
-            let prover_time = start.elapsed().as_millis();
-
-            let start = Instant::now();
-            assert!(FridaVRS::verify_share(&vk, &cm, 0, &shares[0]).unwrap());
-            let verifier_time = start.elapsed().as_millis();
-
-            let per_node_comm_overhead =
-                shares[0].proof.serialized_size(Compress::No) + cm.serialized_size(Compress::No);
-
-            let per_node_comm =
-                data.serialized_size(Compress::No) * blowup / num_nodes + per_node_comm_overhead;
-
-            frida_table.add_row(row![
+            let (log_k, log_l) = conda_shape_heuristic(block_log_size, num_nodes);
+            bench_ndss_helper::<GxzVRS<Fr, MultilinearKzgPCS<Bn254>>>(
+                &mut conda_pst_table,
                 num_nodes,
-                l,
-                k,
-                n,
-                (1 << block_log_size) * Fr::MODULUS_BIT_SIZE / (8 * 2u32.pow(20)),
-                prover_time,
-                per_node_comm_overhead as f64 / 1024.0,
-                per_node_comm as f64 / 1024.0,
-                verifier_time
-            ]);
+                log_k,
+                log_l,
+            );
         }
     }
 
     println!("\n🔔 Frida");
     frida_table.printstd();
+    println!("\n🔔 Conda+PST");
+    conda_pst_table.printstd();
+}
+
+fn bench_ndss_helper<S: VerifiableReedSolomon<Fr>>(
+    table: &mut Table,
+    num_nodes: usize,
+    log_k: usize,
+    log_l: usize,
+) {
+    let rng = &mut StdRng::from_seed([42; 32]);
+    let blowup = 4;
+    let block_log_size = log_k + log_l;
+    let k = 1 << log_k;
+    let l = 1 << log_l;
+    let n = k * blowup;
+
+    let pp = S::setup(k, l, rng).unwrap();
+    let domain = Radix2EvaluationDomain::<Fr>::new(n).unwrap();
+    let (pk, vk) = S::preprocess(&pp, k, l, &domain).unwrap();
+    let data = Matrix::rand(rng, k, l);
+
+    let start = Instant::now();
+    let (cm, shares) = S::compute_shares(&pk, &data).unwrap();
+    let prover_time = start.elapsed().as_millis();
+
+    let start = Instant::now();
+    assert!(S::verify_share(&vk, &cm, 0, &shares[0]).unwrap());
+    let verifier_time = start.elapsed().as_millis();
+
+    let per_node_comm_overhead =
+        shares[0].proof.serialized_size(Compress::No) + cm.serialized_size(Compress::No);
+
+    let per_node_comm =
+        data.serialized_size(Compress::No) * blowup / num_nodes + per_node_comm_overhead;
+
+    table.add_row(row![
+        S::name(),
+        num_nodes,
+        l,
+        k,
+        n,
+        (1 << block_log_size) * Fr::MODULUS_BIT_SIZE / (8 * 2u32.pow(20)),
+        prover_time,
+        per_node_comm_overhead as f64 / 1024.0,
+        per_node_comm as f64 / 1024.0,
+        verifier_time
+    ]);
 }
 
 /// give the log number of fields, figure the balanced/optimal shape for FRIDA
@@ -123,7 +151,84 @@ fn frida_shape_heuristic(log_size: usize) -> (usize, usize) {
     (log_k, log_l)
 }
 
-fn bench_ndss_all() {}
+/// Returns (log_k, log_L), namely log_width, log_height
+#[inline]
+fn conda_shape_heuristic(block_log_size: usize, num_nodes: usize) -> (usize, usize) {
+    // TODO: double-check this!
+    let mut log_k = num_nodes.ilog2() as usize - 2; // same col as number of nodes after 4x blowup
+    if log_k % 2 != 0 {
+        log_k += 1; // we allow 2cols/node, NIEC currently only accept multiple_of_two nv_y
+    }
+    let log_l = block_log_size - log_k;
+    (log_k, log_l)
+}
+
+#[inline]
+fn nnt_shape_heuristic(block_log_size: usize, num_nodes: usize) -> (usize, usize) {
+    let log_k = num_nodes.ilog2() as usize - 2; // same col as number of nodes after 4x blowup
+    let log_l = block_log_size - log_k;
+    (log_k, log_l)
+}
+
+#[inline]
+fn zoda_shape_heuristic(block_log_size: usize) -> (usize, usize) {
+    let log_k = block_log_size / 2; // strictly square
+    let log_l = block_log_size - log_k;
+    (log_k, log_l)
+}
+
+#[inline]
+fn fast_advz_shape_heuristic(block_log_size: usize, num_nodes: usize) -> (usize, usize) {
+    nnt_shape_heuristic(block_log_size, num_nodes)
+}
+
+#[inline]
+fn short_advz_shape_heuristic(block_log_size: usize, num_nodes: usize) -> (usize, usize) {
+    let (log_k, log_l) = nnt_shape_heuristic(block_log_size, num_nodes);
+    (log_k + 2, log_l - 2)
+}
+
+fn bench_ndss_all() {
+    let header = row![
+        "Scheme",
+        "N",
+        "l",
+        "k",
+        "n",
+        "|M| (MB)",
+        "prover (ms)",
+        "per-node overhead. (MB)",
+        "per-node (MB)",
+        "verifier (ms)"
+    ];
+
+    let mut table = Table::new();
+    table.add_row(header.clone());
+
+    let block_log_size = 22usize;
+    let num_nodes = 1024;
+
+    let (log_k, log_l) = frida_shape_heuristic(block_log_size);
+    bench_ndss_helper::<FridaVRS<Fr>>(&mut table, num_nodes, log_k, log_l);
+
+    let (log_k, log_l) = zoda_shape_heuristic(block_log_size);
+    bench_ndss_helper::<ZodaVRS<Fr>>(&mut table, num_nodes, log_k, log_l);
+
+    let (log_k, log_l) = conda_shape_heuristic(block_log_size, num_nodes);
+    bench_ndss_helper::<GxzVRS<Fr, MultilinearKzgPCS<Bn254>>>(&mut table, num_nodes, log_k, log_l);
+
+    let (log_k, log_l) = fast_advz_shape_heuristic(block_log_size, num_nodes);
+    bench_ndss_helper::<AdvzVRS<Bn254>>(&mut table, num_nodes, log_k, log_l);
+
+    let (log_k, log_l) = short_advz_shape_heuristic(block_log_size, num_nodes);
+    bench_ndss_helper::<AdvzVRS<Bn254>>(&mut table, num_nodes, log_k, log_l);
+
+    let (log_k, log_l) = nnt_shape_heuristic(block_log_size, num_nodes);
+    bench_ndss_helper::<KzgNntVRS<Bn254>>(&mut table, num_nodes, log_k, log_l);
+    bench_ndss_helper::<PedersenNntVRS<G1Projective>>(&mut table, num_nodes, log_k, log_l);
+
+    table.printstd();
+}
 
 // handy temporary bench
 fn bench_test() {

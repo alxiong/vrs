@@ -135,6 +135,10 @@ where
     type Commitment = (MerkleRoot<F>, MerkleRoot<F>, MerkleRoot<F>);
     type Proof = ZodaProof<F>;
 
+    fn name() -> &'static str {
+        "Zoda"
+    }
+
     fn setup<R>(
         _max_width: usize,
         _max_height: usize,

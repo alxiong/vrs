@@ -48,6 +48,10 @@ where
     // proof consists of (merkle_path, evaluation_proof)
     type Proof = (merkle_tree::Path<F>, UnivariateKzgProof<E>);
 
+    fn name() -> &'static str {
+        "Advz"
+    }
+
     fn setup<R>(
         max_width: usize,
         _max_height: usize,

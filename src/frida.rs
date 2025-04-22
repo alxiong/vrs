@@ -33,6 +33,10 @@ impl<F: FftField> VerifiableReedSolomon<F> for FridaVRS<F> {
     type Commitment = FriProof<F>;
     type Proof = FridaProof<F>;
 
+    fn name() -> &'static str {
+        "Frida"
+    }
+
     fn setup<R>(
         max_width: usize,
         max_height: usize,

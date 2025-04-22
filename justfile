@@ -11,4 +11,5 @@ trace *test:
 
 # Benchmark for NDSS
 ndss:
-    RAYON_NUM_THREADS=1 cargo run --bin bench --release --features print-trace -- ndss-base
+    @# RAYON_NUM_THREADS=1 cargo run --bin bench --release --features print-trace -- ndss-base
+    RAYON_NUM_THREADS=1 cargo run --bin bench --release -- ndss-base

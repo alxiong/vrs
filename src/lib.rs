@@ -46,6 +46,9 @@ pub trait VerifiableReedSolomon<F: FftField>: Sized {
     /// Proof for a valid share w.r.t the commitment
     type Proof: Clone + Debug + CanonicalSerialize;
 
+    /// scheme name
+    fn name() -> &'static str;
+
     /// Construct public parameters given the upper bounds on X (row_idx) and Y (col_idx) dimension
     /// max_height * max_width (k x L) of the input data blob
     fn setup<R>(

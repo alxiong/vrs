@@ -46,6 +46,10 @@ where
     type Commitment = Vec<Commitment<E>>;
     type Proof = Vec<UnivariateKzgProof<E>>;
 
+    fn name() -> &'static str {
+        "PeerDAS"
+    }
+
     fn setup<R>(
         max_width: usize,
         _max_height: usize,

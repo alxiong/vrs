@@ -38,6 +38,10 @@ where
     // no proof needed
     type Proof = ();
 
+    fn name() -> &'static str {
+        "KzgNNT"
+    }
+
     fn setup<R>(
         max_width: usize,
         max_height: usize,
