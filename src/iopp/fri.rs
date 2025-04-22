@@ -6,7 +6,7 @@
 use ark_ff::{batch_inversion_and_mul, FftField, Field};
 use ark_poly::{EvaluationDomain, Evaluations, Radix2EvaluationDomain};
 use ark_serialize::*;
-use ark_std::{iter::successors, log2};
+use ark_std::{end_timer, iter::successors, log2, start_timer};
 use itertools::izip;
 use nimue::{plugins::ark::*, *};
 use nimue_pow::{blake3::Blake3PoW, PoWChallenge, PoWIOPattern};
@@ -466,15 +466,20 @@ pub(crate) fn prove_internal<F: FftField>(
     let domain_0_size = config.init_domain_size;
 
     // Commit phase
+    let commit_time = start_timer!(|| "commit phase");
     let pd = commit_phase(config, evals, merlin);
+    end_timer!(commit_time);
 
     // Perform Proof-of-work grinding
+    let grind_time = start_timer!(|| "pow grind");
     merlin
         .challenge_pow::<Blake3PoW>(config.pow_bits as f64)
         .unwrap();
+    end_timer!(grind_time);
 
     // Query Phase
     // randomly sampled s_0 for each query, must be sequential squeezing
+    let query_time = start_timer!(|| "query phase");
     let s_0_indices: Vec<usize> = (0..config.num_queries)
         .map(|_| usize::from_le_bytes(merlin.challenge_bytes().unwrap()) % domain_0_size)
         .collect();
@@ -484,8 +489,10 @@ pub(crate) fn prove_internal<F: FftField>(
         .par_iter()
         .map(|&s_0_idx| answer_query(config, &pd, s_0_idx))
         .collect::<Vec<_>>();
+    end_timer!(query_time);
 
     // Producing more query proofs for extra query points
+    let extra_query_time = start_timer!(|| "extra query");
     let extra_query_proofs = extra_query_indices
         .par_iter()
         .map(|&idx| {
@@ -496,6 +503,7 @@ pub(crate) fn prove_internal<F: FftField>(
             }
         })
         .collect();
+    end_timer!(extra_query_time);
 
     (
         FriProof {
@@ -577,6 +585,9 @@ pub(crate) fn batch_prove_internal<F: FftField>(
     proof.batching_proofs = Some(batching_proofs.clone());
 
     // producing correct batching proof for the extra query indices (if not included already)
+    // FIXME: when many `extra_query_indices`, this is highly inefficient. Sadly arkworks only have `generate_multi_proof()`
+    // to generate single proof for multiple leaves, but not multiple proofs for multiple leaves
+    let extra_batch_proof_time = start_timer!(|| "extra query batch proof");
     let extra_batching_proofs = extra_query_indices
         .par_iter()
         .map(|&idx| {
@@ -590,6 +601,7 @@ pub(crate) fn batch_prove_internal<F: FftField>(
             }
         })
         .collect();
+    end_timer!(extra_batch_proof_time);
 
     (proof, extra_query_proofs, extra_batching_proofs)
 }

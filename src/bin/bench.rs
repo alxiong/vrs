@@ -1,12 +1,13 @@
 use std::{env, time::Instant};
 
 use ark_bn254::{Bn254, Fr, G1Projective};
-use ark_ff::FftField;
+use ark_ff::{FftField, PrimeField};
 use ark_poly::{EvaluationDomain, Radix2EvaluationDomain};
 use ark_serialize::*;
 use ark_std::rand::{rngs::StdRng, SeedableRng};
 use itertools::Itertools;
 use jf_pcs::prelude::MultilinearKzgPCS;
+use prettytable::{row, Table};
 use vrs::{
     advz::AdvzVRS,
     frida::FridaVRS,
@@ -28,6 +29,8 @@ fn main() {
             "vid" => bench_vid(),
             "das" => bench_das(),
             "test" => bench_test(),
+            "ndss-base" => bench_ndss_base(),
+            "ndss-all" => bench_ndss_all(),
             _ => {
                 eprintln!("Unknown option: {}", args[1]);
                 std::process::exit(1);
@@ -40,6 +43,88 @@ fn main() {
     }
 }
 
+// only test frida and ours
+fn bench_ndss_base() {
+    let rng = &mut StdRng::from_seed([42; 32]);
+    let blowup = 4;
+
+    let mut frida_table = Table::new();
+    frida_table.add_row(row![
+        "N",
+        "l",
+        "k",
+        "n",
+        "|M| (MB)",
+        "prover (ms)",
+        "per-node overhead. (MB)",
+        "per-node (MB)",
+        "verifier (ms)"
+    ]);
+
+    for num_nodes in [1024, 2048, 4096] {
+        // size means number of fields, not in bytes
+        for block_log_size in [19, 20, 21, 22] {
+            let (log_k, log_l) = frida_shape_heuristic(block_log_size);
+            let k = 1 << log_k;
+            let l = 1 << log_l;
+            let n = k * blowup;
+
+            let pp = FridaVRS::<Fr>::setup(k, l, rng).unwrap();
+            let domain = Radix2EvaluationDomain::<Fr>::new(n).unwrap();
+            let (pk, vk) = FridaVRS::preprocess(&pp, k, l, &domain).unwrap();
+            let data = Matrix::rand(rng, k, l);
+
+            let start = Instant::now();
+            let (cm, shares) = FridaVRS::compute_shares(&pk, &data).unwrap();
+            let prover_time = start.elapsed().as_millis();
+
+            let start = Instant::now();
+            assert!(FridaVRS::verify_share(&vk, &cm, 0, &shares[0]).unwrap());
+            let verifier_time = start.elapsed().as_millis();
+
+            let per_node_comm_overhead =
+                shares[0].proof.serialized_size(Compress::No) + cm.serialized_size(Compress::No);
+
+            let per_node_comm =
+                data.serialized_size(Compress::No) * blowup / num_nodes + per_node_comm_overhead;
+
+            frida_table.add_row(row![
+                num_nodes,
+                l,
+                k,
+                n,
+                (1 << block_log_size) * Fr::MODULUS_BIT_SIZE / (8 * 2u32.pow(20)),
+                prover_time,
+                per_node_comm_overhead as f64 / 1024.0,
+                per_node_comm as f64 / 1024.0,
+                verifier_time
+            ]);
+        }
+    }
+
+    println!("\n🔔 Frida");
+    frida_table.printstd();
+}
+
+/// give the log number of fields, figure the balanced/optimal shape for FRIDA
+/// Returns (log_k, log_L), namely log_width, log_height
+#[inline]
+fn frida_shape_heuristic(log_size: usize) -> (usize, usize) {
+    // for FRIDA, communication cost is lambda * (log^2(k) + L), thus we balance log^2(k) and L
+    // instead of closed-form form, we start with large L and slowly decrease until <= log^2(k)
+    let mut log_l = log_size;
+    let mut log_k = 0usize;
+    while (1 << log_l) > log_k.pow(2u32) {
+        log_l -= 1;
+        log_k += 1;
+    }
+
+    assert_eq!(log_l + log_k, log_size);
+    (log_k, log_l)
+}
+
+fn bench_ndss_all() {}
+
 // handy temporary bench
 fn bench_test() {
     let rng = &mut StdRng::from_seed([42; 32]);
@@ -47,15 +132,21 @@ fn bench_test() {
     let l = 2usize.pow(8);
     let n = 2usize.pow(14);
 
-    let pp = GxzVRS::<Fr, MultilinearKzgPCS<Bn254>>::setup(k, l, rng).unwrap();
+    // let pp = GxzVRS::<Fr, MultilinearKzgPCS<Bn254>>::setup(k, l, rng).unwrap();
+    let pp = FridaVRS::<Fr>::setup(k, l, rng).unwrap();
+    // let pp = AdvzVRS::<Bn254>::setup(k, l, rng).unwrap();
 
-    let domain = Radix2EvaluationDomain::new(n).unwrap();
-    let (pk, _vk) = GxzVRS::<Fr, MultilinearKzgPCS<Bn254>>::preprocess(&pp, k, l, &domain).unwrap();
+    let domain = Radix2EvaluationDomain::<Fr>::new(n).unwrap();
+    // let (pk, _vk) = GxzVRS::<Fr, MultilinearKzgPCS<Bn254>>::preprocess(&pp, k, l, &domain).unwrap();
+    let (pk, _vk) = FridaVRS::preprocess(&pp, k, l, &domain).unwrap();
+    // let (pk, _vk) = AdvzVRS::<Bn254>::preprocess(&pp, k, l, &domain).unwrap();
 
     let data = Matrix::rand(rng, k, l);
 
     let start = Instant::now();
-    let (cm, shares) = GxzVRS::<Fr, MultilinearKzgPCS<Bn254>>::compute_shares(&pk, &data).unwrap();
+    // let (cm, shares) = GxzVRS::<Fr, MultilinearKzgPCS<Bn254>>::compute_shares(&pk, &data).unwrap();
+    let (cm, shares) = FridaVRS::compute_shares(&pk, &data).unwrap();
+    // let (cm, shares) = AdvzVRS::<Bn254>::compute_shares(&pk, &data).unwrap();
     let total_prepare_time = start.elapsed().as_millis();
 
     let prover_time = total_prepare_time;

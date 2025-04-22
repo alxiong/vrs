@@ -21,6 +21,7 @@ nimue-pow = { git = "https://github.com/arkworks-rs/nimue", rev = "857289be31eef
 p3-maybe-rayon = "0.2"
 thiserror = "2"
 rand_chacha = "0.3.1"
+prettytable-rs = "^0.10"
 
 [dev-dependencies]
 criterion = "0.5.1"

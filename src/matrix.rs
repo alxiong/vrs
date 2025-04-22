@@ -3,6 +3,7 @@
 use anyhow::{anyhow, ensure, Result};
 use ark_ff::Field;
 use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial};
+use ark_serialize::CanonicalSerialize;
 use ark_std::collections::BTreeSet;
 use ark_std::rand::{CryptoRng, RngCore};
 use ark_std::slice::Chunks;
@@ -13,7 +14,7 @@ use p3_maybe_rayon::prelude::*;
 ///
 /// # struct contracts
 /// - `data.len() = width * height` at all time
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, CanonicalSerialize)]
 pub struct Matrix<F: Field> {
     data: Arc<Vec<F>>,
     width: usize,
