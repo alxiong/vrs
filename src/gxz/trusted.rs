@@ -50,25 +50,25 @@ where
     type Proof = PartialEvalProof<E>;
 
     fn setup<R>(
-        max_y_degree: usize,
-        max_x_degree: usize,
+        max_width: usize,
+        max_height: usize,
         rng: &mut R,
     ) -> Result<Self::PublicParams, VrsError>
     where
         R: RngCore + CryptoRng,
     {
-        let hacky_supported_degree = combine_u32(max_x_degree as u32, max_y_degree as u32);
+        let hacky_supported_degree = combine_u32(max_height as u32 - 1, max_width as u32 - 1);
         let pp = BivariateKzgPCS::<E>::gen_srs_for_testing(rng, hacky_supported_degree as usize)?;
         Ok(pp)
     }
 
     fn preprocess(
         pp: &Self::PublicParams,
-        y_degree: usize,
-        x_degree: usize,
+        width: usize,
+        height: usize,
         domain: &Radix2EvaluationDomain<F>,
     ) -> Result<(Self::ProverKey, Self::VerifierKey), VrsError> {
-        let supported_degree = combine_u32(x_degree as u32, y_degree as u32);
+        let supported_degree = combine_u32(height as u32 - 1, width as u32 - 1);
         let (pk, vk) = BivariateKzgPCS::trim(pp, supported_degree as usize, None)?;
         let table = multi_evals::bivariate::multi_partial_eval_precompute(&pk, domain);
 
@@ -141,7 +141,6 @@ where
 #[cfg(test)]
 mod tests {
     use ark_bn254::{Bn254, Fr};
-    use ark_std::UniformRand;
 
     use super::*;
     use crate::test_utils::test_rng;
@@ -149,18 +148,15 @@ mod tests {
     #[test]
     fn test_kzg_nnt() {
         let rng = &mut test_rng();
-        let y_degree: usize = 64 - 1;
-        let x_degree = 64 - 1;
-        let domain_size = y_degree.next_power_of_two() * 2;
+        let width: usize = 64;
+        let height = 64;
+        let domain_size = width.next_power_of_two() * 2;
 
-        let pp = BkzgGxzVRS::<Bn254>::setup(y_degree, x_degree, rng).unwrap();
+        let pp = BkzgGxzVRS::<Bn254>::setup(width, height, rng).unwrap();
         let domain = Radix2EvaluationDomain::<Fr>::new(domain_size).unwrap();
-        let (pk, vk) = BkzgGxzVRS::<Bn254>::preprocess(&pp, y_degree, x_degree, &domain).unwrap();
+        let (pk, vk) = BkzgGxzVRS::<Bn254>::preprocess(&pp, width, height, &domain).unwrap();
 
-        let data = (0..(y_degree + 1) * (x_degree + 1))
-            .map(|_| Fr::rand(rng))
-            .collect();
-        let data = Matrix::new(data, y_degree + 1, x_degree + 1).unwrap();
+        let data = Matrix::rand(rng, width, height);
         let (cm, shares) = BkzgGxzVRS::<Bn254>::compute_shares(&pk, &data).unwrap();
 
         for (idx, share) in shares.iter().enumerate() {

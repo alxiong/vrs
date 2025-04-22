@@ -34,33 +34,28 @@ impl<F: FftField> VerifiableReedSolomon<F> for FridaVRS<F> {
     type Proof = FridaProof<F>;
 
     fn setup<R>(
-        max_y_degree: usize,
-        max_x_degree: usize,
+        max_width: usize,
+        max_height: usize,
         _rng: &mut R,
     ) -> Result<Self::PublicParams, VrsError>
     where
         R: RngCore + CryptoRng,
     {
         let log_blowup = 2; // P26 of FRIDA choose blowup = 4
-        let fri_config = FriConfig::new_conjectured::<F>(
-            max_y_degree + 1,
-            log_blowup,
-            None,
-            None,
-            Some(max_x_degree + 1),
-        );
+        let fri_config =
+            FriConfig::new_conjectured::<F>(max_width, log_blowup, None, None, Some(max_height));
         Ok(fri_config)
     }
 
     fn preprocess(
         pp: &Self::PublicParams,
-        y_degree: usize,
-        x_degree: usize,
+        width: usize,
+        height: usize,
         eval_domain: &Radix2EvaluationDomain<F>,
     ) -> Result<(Self::ProverKey, Self::VerifierKey), VrsError> {
         assert_eq!(eval_domain.size as usize, pp.init_domain_size);
-        assert_eq!(pp.msg_len, y_degree + 1);
-        assert_eq!(pp.num_batches, x_degree + 1);
+        assert_eq!(pp.msg_len, width);
+        assert_eq!(pp.num_batches, height);
 
         Ok(((pp.clone(), eval_domain.to_owned()), pp.clone()))
     }
@@ -178,7 +173,6 @@ mod tests {
 
     use super::*;
     use crate::test_utils::test_rng;
-    use ark_std::UniformRand;
 
     #[test]
     fn test_frida_vrs() {
@@ -187,12 +181,11 @@ mod tests {
         let l = 8;
         let n = 2usize.pow(12);
 
-        let pp = FridaVRS::<Fr>::setup(k - 1, l - 1, rng).unwrap();
+        let pp = FridaVRS::<Fr>::setup(k, l, rng).unwrap();
         let domain = Radix2EvaluationDomain::<Fr>::new(n).unwrap();
-        let (pk, vk) = FridaVRS::preprocess(&pp, k - 1, l - 1, &domain).unwrap();
+        let (pk, vk) = FridaVRS::preprocess(&pp, k, l, &domain).unwrap();
 
-        let data = (0..k * l).map(|_| Fr::rand(rng)).collect();
-        let data = Matrix::new(data, k, l).unwrap();
+        let data = Matrix::rand(rng, k, l);
         let (cm, shares) = FridaVRS::compute_shares(&pk, &data).unwrap();
 
         for (idx, share) in shares.iter().enumerate() {

@@ -4,6 +4,7 @@ use anyhow::{anyhow, ensure, Result};
 use ark_ff::Field;
 use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial};
 use ark_std::collections::BTreeSet;
+use ark_std::rand::{CryptoRng, RngCore};
 use ark_std::slice::Chunks;
 use ark_std::sync::Arc;
 use p3_maybe_rayon::prelude::*;
@@ -31,6 +32,11 @@ impl<F: Field> Matrix<F> {
             width,
             height,
         })
+    }
+
+    pub fn rand<R: RngCore + CryptoRng>(rng: &mut R, width: usize, height: usize) -> Self {
+        let data = (0..width * height).map(|_| F::rand(rng)).collect();
+        Matrix::new(data, width, height).unwrap()
     }
 
     /// Reshape the matrix, since we are vec-storage, no memory copy

@@ -49,33 +49,33 @@ where
     type Proof = (merkle_tree::Path<F>, UnivariateKzgProof<E>);
 
     fn setup<R>(
-        max_y_degree: usize,
-        _max_x_degree: usize,
+        max_width: usize,
+        _max_height: usize,
         rng: &mut R,
     ) -> Result<Self::PublicParams, VrsError>
     where
         R: RngCore + CryptoRng,
     {
-        UnivariateUniversalParams::gen_srs_for_testing(rng, max_y_degree).map_err(VrsError::from)
+        UnivariateUniversalParams::gen_srs_for_testing(rng, max_width - 1).map_err(VrsError::from)
     }
 
     fn preprocess(
         pp: &Self::PublicParams,
-        y_degree: usize,
-        x_degree: usize,
+        width: usize,
+        height: usize,
         eval_domain: &Radix2EvaluationDomain<F>,
     ) -> Result<(Self::ProverKey, Self::VerifierKey), VrsError> {
-        let (pk, vk) = UnivariateUniversalParams::trim(pp, y_degree).map_err(VrsError::from)?;
+        let (pk, vk) = UnivariateUniversalParams::trim(pp, width - 1).map_err(VrsError::from)?;
         Ok((
             AdvzVRSProverKey {
-                width: y_degree + 1,
-                height: x_degree + 1,
+                width,
+                height,
                 pcs_pk: pk,
                 domain: eval_domain.to_owned(),
             },
             AdvzVRSVerifierKey {
-                width: y_degree + 1,
-                height: x_degree + 1,
+                width,
+                height,
                 pcs_vk: vk,
                 domain_size: eval_domain.size as usize,
             },
@@ -245,11 +245,10 @@ pub struct AdvzVRSVerifierKey<E: Pairing> {
 
 #[cfg(test)]
 mod tests {
-    use ark_bn254::{Bn254, Fr};
+    use ark_bn254::Bn254;
 
     use super::*;
     use crate::test_utils::test_rng;
-    use ark_std::UniformRand;
 
     #[test]
     fn test_advz_vrs() {
@@ -258,12 +257,11 @@ mod tests {
         let l = 8;
         let n = 2usize.pow(11);
 
-        let pp = AdvzVRS::<Bn254>::setup(k - 1, l - 1, rng).unwrap();
+        let pp = AdvzVRS::<Bn254>::setup(k, l, rng).unwrap();
         let domain = Radix2EvaluationDomain::new(n).unwrap();
-        let (pk, vk) = AdvzVRS::preprocess(&pp, k - 1, l - 1, &domain).unwrap();
+        let (pk, vk) = AdvzVRS::preprocess(&pp, k, l, &domain).unwrap();
 
-        let data = (0..k * l).map(|_| Fr::rand(rng)).collect();
-        let data = Matrix::new(data, k, l).unwrap();
+        let data = Matrix::rand(rng, k, l);
         let (cm, shares) = AdvzVRS::compute_shares(&pk, &data).unwrap();
 
         for (idx, share) in shares.iter().enumerate() {

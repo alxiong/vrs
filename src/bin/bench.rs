@@ -1,7 +1,7 @@
 use std::{env, time::Instant};
 
 use ark_bn254::{Bn254, Fr, G1Projective};
-use ark_ff::{FftField, UniformRand};
+use ark_ff::FftField;
 use ark_poly::{EvaluationDomain, Radix2EvaluationDomain};
 use ark_serialize::*;
 use ark_std::rand::{rngs::StdRng, SeedableRng};
@@ -47,25 +47,17 @@ fn bench_test() {
     let l = 2usize.pow(8);
     let n = 2usize.pow(14);
 
-    // let pp = AdvzVRS::<Bn254>::setup(k - 1, l - 1, rng).unwrap();
-    let pp = FridaVRS::<Fr>::setup(k - 1, l - 1, rng).unwrap();
-    let domain = Radix2EvaluationDomain::new(n).unwrap();
-    // let (pk, _vk) = AdvzVRS::preprocess(&pp, k - 1, l - 1, &domain).unwrap();
-    let (pk, _vk) = FridaVRS::preprocess(&pp, k - 1, l - 1, &domain).unwrap();
+    let pp = GxzVRS::<Fr, MultilinearKzgPCS<Bn254>>::setup(k, l, rng).unwrap();
 
-    let data = (0..k * l).map(|_| Fr::rand(rng)).collect();
-    let data = Matrix::new(data, k, l).unwrap();
+    let domain = Radix2EvaluationDomain::new(n).unwrap();
+    let (pk, _vk) = GxzVRS::<Fr, MultilinearKzgPCS<Bn254>>::preprocess(&pp, k, l, &domain).unwrap();
+
+    let data = Matrix::rand(rng, k, l);
 
     let start = Instant::now();
-    // let (cm, shares) = AdvzVRS::compute_shares(&pk, &data).unwrap();
-    let (cm, shares) = FridaVRS::compute_shares(&pk, &data).unwrap();
+    let (cm, shares) = GxzVRS::<Fr, MultilinearKzgPCS<Bn254>>::compute_shares(&pk, &data).unwrap();
     let total_prepare_time = start.elapsed().as_millis();
 
-    // let start = Instant::now();
-    // let _ = FridaVRS::<Fr>::interleaved_rs_encode(&data, &domain).unwrap();
-    // let encode_time = start.elapsed().as_millis();
-
-    // let prover_time = total_prepare_time - encode_time;
     let prover_time = total_prepare_time;
 
     // Communication consists of commitment size and opening proof per replica/share
@@ -174,10 +166,10 @@ fn bench_helper<F: FftField, S: VerifiableReedSolomon<F>>(
     let mut log_k_choices = log_k_choices.to_vec();
     log_l_choices.sort();
     log_k_choices.sort();
-    let max_x_degree = 1 << log_l_choices.last().unwrap();
-    let max_y_degree = 1 << log_k_choices.last().unwrap();
+    let max_height = 1 << log_l_choices.last().unwrap();
+    let max_width = 1 << log_k_choices.last().unwrap();
 
-    let mut pp = S::setup(max_y_degree, max_x_degree, rng).unwrap();
+    let mut pp = S::setup(max_width, max_height, rng).unwrap();
 
     println!("l, k, n, prover (ms), communication (byte), verifier (ms)");
     for (log_l, log_k) in log_l_choices
@@ -193,15 +185,14 @@ fn bench_helper<F: FftField, S: VerifiableReedSolomon<F>>(
         let k = 1 << log_k;
 
         if extra_opt.per_degree_setup {
-            pp = S::setup(k - 1, l - 1, rng).unwrap();
+            pp = S::setup(k, l, rng).unwrap();
         }
         // fixed RS rate of 1/2
-        let domain = Radix2EvaluationDomain::new(2 * k).unwrap();
+        let domain = Radix2EvaluationDomain::new(4 * k).unwrap();
 
-        let (pk, vk) = S::preprocess(&pp, k - 1, l - 1, &domain).unwrap();
+        let (pk, vk) = S::preprocess(&pp, k, l, &domain).unwrap();
 
-        let data = (0..k * l).map(|_| F::rand(rng)).collect();
-        let data = Matrix::new(data, k, l).unwrap();
+        let data = Matrix::rand(rng, k, l);
 
         // Benchmarking prover time by computing all shares and minus the interleaved RS encoding time
         let start = Instant::now();

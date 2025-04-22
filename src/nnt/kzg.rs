@@ -39,24 +39,24 @@ where
     type Proof = ();
 
     fn setup<R>(
-        max_y_degree: usize,
-        max_x_degree: usize,
+        max_width: usize,
+        max_height: usize,
         rng: &mut R,
     ) -> Result<Self::PublicParams, VrsError>
     where
         R: RngCore + CryptoRng,
     {
-        let max_degree = max_y_degree.max(max_x_degree);
+        let max_degree = max_width.max(max_height) - 1;
         UnivariateUniversalParams::gen_srs_for_testing(rng, max_degree).map_err(VrsError::from)
     }
 
     fn preprocess(
         pp: &Self::PublicParams,
-        y_degree: usize,
-        x_degree: usize,
+        width: usize,
+        height: usize,
         domain: &Radix2EvaluationDomain<F>,
     ) -> Result<(Self::ProverKey, Self::VerifierKey), VrsError> {
-        let max_degree = y_degree.max(x_degree);
+        let max_degree = width.max(height) - 1;
         let (pk, _vk) = UnivariateUniversalParams::trim(pp, max_degree).map_err(VrsError::from)?;
         Ok(((pk.clone(), domain.to_owned()), (pk, domain.size as usize)))
     }
@@ -127,7 +127,6 @@ where
 #[cfg(test)]
 mod tests {
     use ark_bn254::{Bn254, Fr};
-    use ark_std::UniformRand;
 
     use super::*;
     use crate::test_utils::test_rng;
@@ -135,18 +134,15 @@ mod tests {
     #[test]
     fn test_kzg_nnt() {
         let rng = &mut test_rng();
-        let y_degree = 64;
-        let x_degree = 64;
-        let domain_size = y_degree * 2;
+        let width = 64;
+        let height = 64;
+        let domain_size = width * 2;
 
-        let pp = KzgNntVRS::<Bn254>::setup(y_degree, x_degree, rng).unwrap();
+        let pp = KzgNntVRS::<Bn254>::setup(width, height, rng).unwrap();
         let domain = Radix2EvaluationDomain::<Fr>::new(domain_size).unwrap();
-        let (pk, vk) = KzgNntVRS::preprocess(&pp, y_degree, x_degree, &domain).unwrap();
+        let (pk, vk) = KzgNntVRS::preprocess(&pp, width, height, &domain).unwrap();
 
-        let data = (0..(y_degree + 1) * (x_degree + 1))
-            .map(|_| Fr::rand(rng))
-            .collect();
-        let data = Matrix::new(data, y_degree + 1, x_degree + 1).unwrap();
+        let data = Matrix::rand(rng, width, height);
         let (cm, shares) = KzgNntVRS::compute_shares(&pk, &data).unwrap();
 
         for (idx, share) in shares.iter().enumerate() {

@@ -136,8 +136,8 @@ where
     type Proof = ZodaProof<F>;
 
     fn setup<R>(
-        _max_y_degree: usize,
-        _max_x_degree: usize,
+        _max_width: usize,
+        _max_height: usize,
         _rng: &mut R,
     ) -> Result<Self::PublicParams, VrsError>
     where
@@ -148,23 +148,20 @@ where
 
     fn preprocess(
         pp: &Self::PublicParams,
-        y_degree: usize,
-        x_degree: usize,
+        width: usize,
+        height: usize,
         _eval_domain: &Radix2EvaluationDomain<F>,
     ) -> Result<(Self::ProverKey, Self::VerifierKey), VrsError> {
         // TODO: (alex) extend to non-square shape
-        if y_degree != x_degree {
+        if width != height {
             return Err(VrsError::InvalidParam(
                 "only square data blob for now".to_string(),
             ));
         }
         let mut io = IOPattern::<DefaultHash>::new("ZodaVRS").absorb(32, "col_commit_root");
-        io = FieldIOPattern::<F>::challenge_scalars(io, x_degree + 1, "rand_scales");
+        io = FieldIOPattern::<F>::challenge_scalars(io, height, "rand_scales");
 
-        Ok((
-            (*pp, y_degree + 1, x_degree + 1, io.clone()),
-            (*pp, y_degree + 1, x_degree + 1, io),
-        ))
+        Ok(((*pp, width, height, io.clone()), (*pp, width, height, io)))
     }
 
     fn compute_shares(
@@ -394,21 +391,24 @@ mod tests {
     use super::*;
     use crate::test_utils::test_rng;
     use ark_bn254::Fr;
-    use ark_std::UniformRand;
 
     #[test]
-    fn test_advz_vrs() {
+    fn test_zoda_vrs() {
         let rng = &mut test_rng();
         let k = 2usize.pow(7);
         let l = 2usize.pow(7);
         let n = 2usize.pow(8);
 
-        let pp = ZodaVRS::<Fr>::setup(k - 1, l - 1, rng).unwrap();
+        let pp = ZodaVRS::<Fr>::setup(k, l, rng).unwrap();
+        println!(
+            "num_samples: {:?}, num_nodes: {}",
+            pp.num_samples_per_node(),
+            pp.num_nodes(k)
+        );
         let domain = Radix2EvaluationDomain::<Fr>::new(n).unwrap(); // effectively unused
-        let (pk, vk) = ZodaVRS::preprocess(&pp, k - 1, l - 1, &domain).unwrap();
+        let (pk, vk) = ZodaVRS::preprocess(&pp, k, l, &domain).unwrap();
 
-        let data = (0..k * l).map(|_| Fr::rand(rng)).collect();
-        let data = Matrix::new(data, k, l).unwrap();
+        let data = Matrix::<Fr>::rand(rng, k, l);
         let (cm, shares) = ZodaVRS::compute_shares(&pk, &data).unwrap();
 
         for (idx, share) in shares.iter().enumerate() {

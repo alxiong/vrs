@@ -36,16 +36,16 @@ where
     type Proof = ();
 
     fn setup<R>(
-        _max_y_degree: usize,
-        max_x_degree: usize,
+        _max_width: usize,
+        max_height: usize,
         rng: &mut R,
     ) -> Result<Self::PublicParams, VrsError>
     where
         R: RngCore + CryptoRng,
     {
-        let mut pp = Vec::with_capacity(max_x_degree + 1);
+        let mut pp = Vec::with_capacity(max_height);
         let mut base = C::rand(rng);
-        for _ in 0..max_x_degree + 1 {
+        for _ in 0..max_height {
             pp.push(base);
             base.double_in_place();
         }
@@ -54,12 +54,12 @@ where
 
     fn preprocess(
         pp: &Self::PublicParams,
-        _y_degree: usize,
-        x_degree: usize,
+        _width: usize,
+        height: usize,
         eval_domain: &Radix2EvaluationDomain<F>,
     ) -> Result<(Self::ProverKey, Self::VerifierKey), VrsError> {
         let mut trimmed = pp.clone();
-        trimmed.truncate(x_degree + 1);
+        trimmed.truncate(height);
         Ok((
             (trimmed.clone(), eval_domain.to_owned()),
             (trimmed, eval_domain.size as usize),
@@ -127,7 +127,6 @@ where
 #[cfg(test)]
 mod tests {
     use ark_bn254::{Fr, G1Projective};
-    use ark_std::UniformRand;
 
     use super::*;
     use crate::test_utils::test_rng;
@@ -135,19 +134,16 @@ mod tests {
     #[test]
     fn test_pedersen_nnt() {
         let rng = &mut test_rng();
-        let y_degree = 64;
-        let x_degree = 64;
-        let domain_size = y_degree * 2;
+        let width = 64;
+        let height = 64;
+        let domain_size = width * 2;
 
-        let pp = PedersenNntVRS::<G1Projective>::setup(y_degree, x_degree, rng).unwrap();
+        let pp = PedersenNntVRS::<G1Projective>::setup(width, height, rng).unwrap();
         let domain = Radix2EvaluationDomain::<Fr>::new(domain_size).unwrap();
         let (pk, vk) =
-            PedersenNntVRS::<G1Projective>::preprocess(&pp, y_degree, x_degree, &domain).unwrap();
+            PedersenNntVRS::<G1Projective>::preprocess(&pp, width, height, &domain).unwrap();
 
-        let data = (0..(y_degree + 1) * (x_degree + 1))
-            .map(|_| Fr::rand(rng))
-            .collect();
-        let data = Matrix::new(data, y_degree + 1, x_degree + 1).unwrap();
+        let data = Matrix::rand(rng, width, height);
         let (cm, shares) = PedersenNntVRS::<G1Projective>::compute_shares(&pk, &data).unwrap();
 
         for (idx, share) in shares.iter().enumerate() {

@@ -65,15 +65,15 @@ where
     type Proof = GxzProof<F, PCS>;
 
     fn setup<R>(
-        max_y_degree: usize,
-        max_x_degree: usize,
+        max_width: usize,
+        max_height: usize,
         rng: &mut R,
     ) -> Result<Self::PublicParams, VrsError>
     where
         R: RngCore + CryptoRng,
     {
-        let nv_x = log2(max_x_degree + 1) as usize;
-        let nv_y = log2(max_y_degree + 1) as usize;
+        let nv_x = log2(max_height) as usize;
+        let nv_y = log2(max_width) as usize;
         let nv = nv_x + nv_y;
 
         let srs = PCS::gen_srs_for_testing(rng, nv)?;
@@ -82,16 +82,16 @@ where
 
     fn preprocess(
         pp: &Self::PublicParams,
-        y_degree: usize,
-        x_degree: usize,
+        width: usize,
+        height: usize,
         domain: &Radix2EvaluationDomain<F>,
     ) -> Result<(Self::ProverKey, Self::VerifierKey), VrsError> {
-        let nv_x = log2(x_degree + 1) as usize;
-        let nv_y = log2(y_degree + 1) as usize;
+        let nv_x = log2(height) as usize;
+        let nv_y = log2(width) as usize;
         let nv = nv_x + nv_y;
 
-        // NOTE: hardcode a step size of 2, adjustable.
-        let config = ConsolidationConfig::new(nv_y, domain.size as usize, 4);
+        // NOTE: hardcode a step size of 2 or 4, adjustable.
+        let config = ConsolidationConfig::new(nv_y, domain.size as usize, 2);
         let (pcs_pk, pcs_vk) = <PCS::SRS as StructuredReferenceString>::trim(&pp, nv)?;
 
         let mut io = IOPattern::<DefaultHash>::new("GxzVRS")
@@ -280,24 +280,22 @@ mod tests {
     use super::*;
     use crate::test_utils::test_rng;
     use ark_poly::EvaluationDomain;
-    use ark_std::UniformRand;
     use jf_pcs::prelude::MultilinearKzgPCS;
 
     #[test]
     fn test_gxz_vrs_with_pst() {
         let rng = &mut test_rng();
-        let k = 2usize.pow(10);
+        let k = 2usize.pow(8);
         let l = 8;
-        let n = 2usize.pow(11);
+        let n = 2usize.pow(10);
 
         // using PST multilinear PCS
-        let pp = GxzVRS::<Fr, MultilinearKzgPCS<Bn254>>::setup(k - 1, l - 1, rng).unwrap();
+        let pp = GxzVRS::<Fr, MultilinearKzgPCS<Bn254>>::setup(k, l, rng).unwrap();
         let domain = Radix2EvaluationDomain::<Fr>::new(n).unwrap();
         let (pk, vk) =
-            GxzVRS::<Fr, MultilinearKzgPCS<Bn254>>::preprocess(&pp, k - 1, l - 1, &domain).unwrap();
+            GxzVRS::<Fr, MultilinearKzgPCS<Bn254>>::preprocess(&pp, k, l, &domain).unwrap();
 
-        let data = (0..k * l).map(|_| Fr::rand(rng)).collect();
-        let data = Matrix::new(data, k, l).unwrap();
+        let data = Matrix::rand(rng, k, l);
         let (cm, shares) =
             GxzVRS::<Fr, MultilinearKzgPCS<Bn254>>::compute_shares(&pk, &data).unwrap();
 
