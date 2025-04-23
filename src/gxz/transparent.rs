@@ -1,4 +1,6 @@
 //! Transparent VRS based on evaluation consolidation technique
+#![allow(unused_variables)]
+use std::time::Instant;
 
 use crate::{
     gxz::{niec, twin::MultilinearTwin},
@@ -122,6 +124,11 @@ where
             data.height()
         ));
 
+        let total_start = Instant::now();
+        // see module doc of `pcs/lightligero_test.rs`
+        let mut lightligero_deductible = 0;
+        let mut dory_deductible = 0;
+
         // 1. interpret data matrix as bivariate poly (in coeff form), and commit its twin MLE
         let commit_time = start_timer!(|| "commit twin MLE");
         let data_bv_poly = bivariate::DensePolynomial::new(
@@ -130,19 +137,49 @@ where
             data.width() - 1,
         );
         let twin_mle = MLE::from(data_bv_poly.twin()); // simply put inside Arc<_>
+        #[cfg(feature = "print-conda")]
+        println!(
+            "Conda::computed TwinMLE: {} ms",
+            total_start.elapsed().as_millis()
+        );
+
+        let start = Instant::now();
         let mle_commit = PCS::commit(&pk.1, &twin_mle)?;
+        #[cfg(feature = "print-conda")]
+        println!(
+            "Conda::MLE commit: {} ms, total: {} ms",
+            start.elapsed().as_millis(),
+            total_start.elapsed().as_millis()
+        );
+        dory_deductible += start.elapsed().as_millis();
         merlin.add_bytes(&hash_mlpc_commit(&mle_commit)).unwrap();
         end_timer!(commit_time);
 
         // 2. interleaved encoding
         let encode_time = start_timer!(|| "encode data");
+        let start = Instant::now();
         let encoded = Self::interleaved_rs_encode(data, domain)?;
+        #[cfg(feature = "print-conda")]
+        println!(
+            "Conda::encode: {} ms, total: {} ms",
+            start.elapsed().as_millis(),
+            total_start.elapsed().as_millis()
+        );
+        lightligero_deductible += start.elapsed().as_millis();
         end_timer!(encode_time);
 
         // 3. commit all column-symbols
         let mt_commit_time = start_timer!(|| "merkle commit symbols");
+        let start = Instant::now();
         let leaves = encoded.par_col().collect::<Vec<_>>();
         let mt = SymbolMerkleTree::<F>::new(leaves);
+        #[cfg(feature = "print-conda")]
+        println!(
+            "Conda::MT commit: {} ms, total: {} ms",
+            start.elapsed().as_millis(),
+            total_start.elapsed().as_millis()
+        );
+        lightligero_deductible += start.elapsed().as_millis();
         merlin.add_bytes(&mt.root()).unwrap();
         end_timer!(mt_commit_time);
 
@@ -156,20 +193,41 @@ where
             })
             .collect();
         assert_eq!(evals.len(), domain_size);
+        #[cfg(feature = "print-conda")]
+        println!(
+            "Conda::partial evals done, total: {} ms",
+            total_start.elapsed().as_millis()
+        );
 
         // 4.5 run evaluation consolidation
         let consolidate_time = start_timer!(|| "eval consolidate");
+        let start = Instant::now();
         let (consolidated_point_y, consolidation_proofs) = niec::consolidate(&pk.0, &evals);
         let consolidated_point_x = successors(Some(beta), |&prev| Some(prev.square()))
             .take(nv_x)
             .collect();
         let consolidated_point = [consolidated_point_x, consolidated_point_y].concat();
+        #[cfg(feature = "print-conda")]
+        println!(
+            "Conda::Consolidate: {} ms, total: {} ms",
+            start.elapsed().as_millis(),
+            total_start.elapsed().as_millis()
+        );
         end_timer!(consolidate_time);
 
         // 5. Run MLPC evaluation on the consolidated point
         let mlpc_eval_time = start_timer!(|| "mlpc eval");
+        let start = Instant::now();
         let (mlpc_eval_proof, consolidated_eval) =
             PCS::open(&pk.1, &twin_mle, &consolidated_point)?;
+        #[cfg(feature = "print-conda")]
+        println!(
+            "Conda::MLPC eval: {} ms, total: {} ms",
+            start.elapsed().as_millis(),
+            total_start.elapsed().as_millis()
+        );
+        dory_deductible += start.elapsed().as_millis();
+
         end_timer!(mlpc_eval_time);
 
         // prepare all VRS share
@@ -178,6 +236,7 @@ where
             .col_iter()
             .zip(consolidation_proofs.into_iter())
             .enumerate()
+            .take(1)
             .map(|(j, (data, consolidation_proof))| {
                 let symbol_mt_proof = mt.generate_proof(j);
                 VrsShare {
@@ -194,6 +253,21 @@ where
             })
             .collect::<Vec<_>>();
         end_timer!(total_time);
+        #[cfg(feature = "print-conda")]
+        println!(
+            "Conda::prepare shares done, total: {} ms",
+            total_start.elapsed().as_millis()
+        );
+        // since PST open and commit can share lots of compute
+        // println!(
+        //     "⚠️ ⚠️ Conda::PST/Dory deductiable: {} ms",
+        //     dory_deductible * 3 / 10
+        // );
+        println!(
+            "⚠️ ⚠️ Conda::LightLigero deductiable: {} ms\n",
+            lightligero_deductible
+        );
+        println!("+-------------------------------------+");
 
         Ok((mle_commit, shares))
     }

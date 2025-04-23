@@ -3,6 +3,8 @@
 //! Reference:
 //! - https://eprint.iacr.org/2024/248
 
+use std::time::Instant;
+
 use crate::{
     iopp::fri::{self, BatchedColProof, FriConfig, FriProof, QueryProof, TranscriptData},
     matrix::Matrix,
@@ -47,7 +49,7 @@ impl<F: FftField> VerifiableReedSolomon<F> for FridaVRS<F> {
     {
         let log_blowup = 2; // P26 of FRIDA choose blowup = 4
         let fri_config =
-            FriConfig::new_conjectured::<F>(max_width, log_blowup, None, None, Some(max_height));
+            FriConfig::new_provable::<F>(max_width, log_blowup, None, None, Some(max_height));
         Ok(fri_config)
     }
 
@@ -79,15 +81,24 @@ impl<F: FftField> VerifiableReedSolomon<F> for FridaVRS<F> {
             pk.0.blowup(),
         ));
         let init_domain_size = pk.0.init_domain_size;
+        #[cfg(feature = "print-frida")]
+        let total_start = Instant::now();
 
         // 1. encode Lxk into Lxn matrix (row-wise FFT)
         let encode_time = start_timer!(|| "encode data (and prepare FRI evals)");
+        let start = Instant::now();
         let evals = if init_domain_size == pk.1.size as usize {
             Self::interleaved_rs_encode(data, &pk.1)?
         } else {
             let domain = Radix2EvaluationDomain::new(init_domain_size).unwrap();
             Self::interleaved_rs_encode(data, &domain)?
         };
+        #[cfg(feature = "print-frida")]
+        println!(
+            "FRIDA::encode: {} ms, total: {} ms",
+            start.elapsed().as_millis(),
+            total_start.elapsed().as_millis()
+        );
         end_timer!(encode_time);
 
         // 2. compute proofs for all columns (one per node/replica)
@@ -95,8 +106,15 @@ impl<F: FftField> VerifiableReedSolomon<F> for FridaVRS<F> {
 
         let prover_time = start_timer!(|| "batched FRI prove");
         let mut merlin = pk.0.io.to_merlin();
+        let start = Instant::now();
         let (fri_proof, extra_query_proofs, extra_batching_proofs) =
             fri::batch_prove_internal(&mut merlin, &pk.0, &evals, &node_indices);
+        #[cfg(feature = "print-frida")]
+        println!(
+            "FRIDA::batch_prove: {} ms, total: {} ms",
+            start.elapsed().as_millis(),
+            total_start.elapsed().as_millis()
+        );
         end_timer!(prover_time);
 
         // 3. finally, assemble all shares
@@ -118,7 +136,11 @@ impl<F: FftField> VerifiableReedSolomon<F> for FridaVRS<F> {
                 },
             )
             .collect();
-
+        #[cfg(feature = "print-frida")]
+        println!(
+            "FRIDA::shares assembled, total: {} ms",
+            total_start.elapsed().as_millis()
+        );
         end_timer!(total_time);
 
         Ok((fri_proof, shares))

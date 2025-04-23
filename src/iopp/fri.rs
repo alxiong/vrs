@@ -3,6 +3,8 @@
 //! # Reference
 //! - batching: https://eprint.iacr.org/2020/654.pdf (Sec 8.2)
 
+use std::time::Instant;
+
 use ark_ff::{batch_inversion_and_mul, FftField, Field};
 use ark_poly::{EvaluationDomain, Evaluations, Radix2EvaluationDomain};
 use ark_serialize::*;
@@ -467,19 +469,27 @@ pub(crate) fn prove_internal<F: FftField>(
 
     // Commit phase
     let commit_time = start_timer!(|| "commit phase");
+    let start = Instant::now();
     let pd = commit_phase(config, evals, merlin);
+    #[cfg(feature = "print-frida")]
+    println!("\t Fri::commit phase : {} ms", start.elapsed().as_millis());
+
     end_timer!(commit_time);
 
     // Perform Proof-of-work grinding
+    let start = Instant::now();
     let grind_time = start_timer!(|| "pow grind");
     merlin
         .challenge_pow::<Blake3PoW>(config.pow_bits as f64)
         .unwrap();
+    #[cfg(feature = "print-frida")]
+    println!("\t Fri::PoW grind: {} ms", start.elapsed().as_millis(),);
     end_timer!(grind_time);
 
     // Query Phase
     // randomly sampled s_0 for each query, must be sequential squeezing
     let query_time = start_timer!(|| "query phase");
+    let start = Instant::now();
     let s_0_indices: Vec<usize> = (0..config.num_queries)
         .map(|_| usize::from_le_bytes(merlin.challenge_bytes().unwrap()) % domain_0_size)
         .collect();
@@ -490,9 +500,12 @@ pub(crate) fn prove_internal<F: FftField>(
         .map(|&s_0_idx| answer_query(config, &pd, s_0_idx))
         .collect::<Vec<_>>();
     end_timer!(query_time);
+    #[cfg(feature = "print-frida")]
+    println!("\t Fri::query proof: {} ms", start.elapsed().as_millis(),);
 
     // Producing more query proofs for extra query points
     let extra_query_time = start_timer!(|| "extra query");
+    let start = Instant::now();
     let extra_query_proofs = extra_query_indices
         .par_iter()
         .map(|&idx| {
@@ -504,6 +517,11 @@ pub(crate) fn prove_internal<F: FftField>(
         })
         .collect();
     end_timer!(extra_query_time);
+    #[cfg(feature = "print-frida")]
+    println!(
+        "\t Fri::extra query proof: {} ms",
+        start.elapsed().as_millis(),
+    );
 
     (
         FriProof {
@@ -533,8 +551,12 @@ pub(crate) fn batch_prove_internal<F: FftField>(
     extra_query_indices: &[usize],
 ) -> (FriProof<F>, Vec<QueryProof<F>>, Vec<BatchedColProof<F>>) {
     // first commit all batches column wise
+    let start = Instant::now();
     let leaves = evals.par_col().collect::<Vec<Vec<_>>>();
     let mt = SymbolMerkleTree::<F>::from_slice(&leaves);
+    #[cfg(feature = "print-frida")]
+    println!("\t Fri::MT commit: {} ms", start.elapsed().as_millis(),);
+
     merlin.add_bytes(&mt.root()).unwrap();
 
     // derive the random combiner alpha, and linear combine all rows
@@ -575,6 +597,7 @@ pub(crate) fn batch_prove_internal<F: FftField>(
 
     // Update all the query opening proof on batched matrix to prove correct batching
     let fri_query_indices = TranscriptData::<F>::parse(config, &proof.transcript).query_indices;
+    let start = Instant::now();
     let batching_proofs = fri_query_indices
         .par_iter()
         .map(|&idx| BatchedColProof {
@@ -583,11 +606,17 @@ pub(crate) fn batch_prove_internal<F: FftField>(
         })
         .collect::<Vec<_>>();
     proof.batching_proofs = Some(batching_proofs.clone());
+    #[cfg(feature = "print-frida")]
+    println!(
+        "\t Fri::batch_col proof: {} ms",
+        start.elapsed().as_millis(),
+    );
 
     // producing correct batching proof for the extra query indices (if not included already)
     // FIXME: when many `extra_query_indices`, this is highly inefficient. Sadly arkworks only have `generate_multi_proof()`
     // to generate single proof for multiple leaves, but not multiple proofs for multiple leaves
     let extra_batch_proof_time = start_timer!(|| "extra query batch proof");
+    let start = Instant::now();
     let extra_batching_proofs = extra_query_indices
         .par_iter()
         .map(|&idx| {
@@ -601,6 +630,11 @@ pub(crate) fn batch_prove_internal<F: FftField>(
             }
         })
         .collect();
+    println!(
+        "⚠️ ⚠️ Fri::batch mt open : {} ms",
+        start.elapsed().as_millis()
+    );
+
     end_timer!(extra_batch_proof_time);
 
     (proof, extra_query_proofs, extra_batching_proofs)

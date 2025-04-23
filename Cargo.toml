@@ -30,6 +30,8 @@ criterion = "0.5.1"
 default = ["parallel"]
 parallel = ["ark-ec/parallel", "ark-ff/parallel", "ark-poly/parallel", "jf-pcs/parallel", "p3-maybe-rayon/parallel"]
 print-trace = ["ark-std/print-trace"]
+print-conda = []
+print-frida = []
 
 [[bench]]
 name = "multi_evals"

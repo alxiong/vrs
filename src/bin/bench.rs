@@ -67,21 +67,21 @@ fn bench_ndss_base() {
     let mut conda_lightligero_table = Table::new();
     conda_lightligero_table.add_row(header);
 
-    // for num_nodes in [1024, 2048, 4096] {
-    for num_nodes in [1024] {
+    for num_nodes in [512, 1024, 2048, 4096] {
+        // for num_nodes in [512] {
         // size means number of fields, not in bytes
-        // for block_log_size in [19, 20, 21, 22] {
-        for block_log_size in [19] {
+        for block_log_size in [19, 20, 21, 22] {
+            // for block_log_size in [19] {
             let (log_k, log_l) = frida_shape_heuristic(block_log_size);
             bench_ndss_helper::<FridaVRS<Fr>>(&mut frida_table, num_nodes, log_k, log_l);
 
             let (log_k, log_l) = conda_shape_heuristic(block_log_size, num_nodes);
-            // bench_ndss_helper::<GxzVRS<Fr, MultilinearKzgPCS<Bn254>>>(
-            //     &mut conda_pst_table,
-            //     num_nodes,
-            //     log_k,
-            //     log_l,
-            // );
+            bench_ndss_helper::<GxzVRS<Fr, MultilinearKzgPCS<Bn254>>>(
+                &mut conda_pst_table,
+                num_nodes,
+                log_k,
+                log_l,
+            );
 
             bench_ndss_helper::<GxzVRS<Fr, LightLigeroPCS<Bn254>>>(
                 &mut conda_lightligero_table,
@@ -152,24 +152,26 @@ fn bench_ndss_helper<S: VerifiableReedSolomon<Fr>>(
 fn frida_shape_heuristic(log_size: usize) -> (usize, usize) {
     // for FRIDA, communication cost is lambda * (log^2(k) + L), thus we balance log^2(k) and L
     // instead of closed-form form, we start with large L and slowly decrease until <= log^2(k)
-    let mut log_l = log_size;
-    let mut log_k = 0usize;
-    while (1 << log_l) > log_k.pow(2u32) {
-        log_l -= 1;
-        log_k += 1;
-    }
+    // let mut log_l = log_size;
+    // let mut log_k = 0usize;
+    // while (1 << log_l) > log_k.pow(2u32) {
+    //     log_l -= 1;
+    //     log_k += 1;
+    // }
+    // assert_eq!(log_l + log_k, log_size);
 
-    assert_eq!(log_l + log_k, log_size);
+    let log_l = 5;
+    let log_k = log_size - log_l;
     (log_k, log_l)
 }
 
 /// Returns (log_k, log_L), namely log_width, log_height
 #[inline]
 fn conda_shape_heuristic(block_log_size: usize, num_nodes: usize) -> (usize, usize) {
-    // TODO: double-check this!
-    let mut log_k = num_nodes.ilog2() as usize - 2; // same col as number of nodes after 4x blowup
+    // TODO: double-check this! // same col as number of nodes after 4x blowup
+    let mut log_k = num_nodes.ilog2() as usize - 2;
     if log_k % 2 != 0 {
-        log_k += 1; // we allow 2cols/node, NIEC currently only accept multiple_of_two nv_y
+        log_k -= 1;
     }
     let log_l = block_log_size - log_k;
     (log_k, log_l)
@@ -228,6 +230,7 @@ fn bench_ndss_all() {
 
     let (log_k, log_l) = conda_shape_heuristic(block_log_size, num_nodes);
     bench_ndss_helper::<GxzVRS<Fr, MultilinearKzgPCS<Bn254>>>(&mut table, num_nodes, log_k, log_l);
+    bench_ndss_helper::<GxzVRS<Fr, LightLigeroPCS<Bn254>>>(&mut table, num_nodes, log_k, log_l);
 
     let (log_k, log_l) = fast_advz_shape_heuristic(block_log_size, num_nodes);
     bench_ndss_helper::<AdvzVRS<Bn254>>(&mut table, num_nodes, log_k, log_l);
