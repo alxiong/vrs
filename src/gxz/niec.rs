@@ -62,7 +62,7 @@ impl<F: FftField> ConsolidationConfig<F> {
 }
 
 /// Non-interactive Proof of correct consolidation
-#[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize, Default)]
+#[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize, Default, Hash, PartialEq, Eq)]
 pub struct ConsolidationProof<F: Field> {
     /// Fiat-Shamir transcript containing one merkle_root per round
     pub transcript: Vec<u8>,
@@ -315,6 +315,53 @@ fn interpolate<F: FftField>(evals: &[F], offset: F) -> Vec<F> {
             let coset = Radix2EvaluationDomain::new_coset(n, offset).unwrap();
             coset.ifft(&evals)
         },
+    }
+}
+
+impl<F: FftField> CanonicalSerialize for ConsolidationConfig<F> {
+    fn serialize_with_mode<W: Write>(
+        &self,
+        mut writer: W,
+        compress: Compress,
+    ) -> Result<(), SerializationError> {
+        self.domain.serialize_with_mode(&mut writer, compress)?;
+        self.nv.serialize_with_mode(&mut writer, compress)?;
+        self.s.serialize_with_mode(&mut writer, compress)?;
+        self.io
+            .as_bytes()
+            .serialize_with_mode(&mut writer, compress)?;
+        Ok(())
+    }
+
+    fn serialized_size(&self, compress: Compress) -> usize {
+        self.domain.serialized_size(compress)
+            + self.nv.serialized_size(compress)
+            + self.s.serialized_size(compress)
+            + self.io.as_bytes().serialized_size(compress)
+    }
+}
+impl<F: FftField> Valid for ConsolidationConfig<F> {
+    fn check(&self) -> Result<(), SerializationError> {
+        // TODO:
+        // 1. unit test canonical serde
+        // 2. add some validity check
+        Ok(())
+    }
+}
+
+impl<F: FftField> CanonicalDeserialize for ConsolidationConfig<F> {
+    fn deserialize_with_mode<R: Read>(
+        mut reader: R,
+        compress: Compress,
+        validate: Validate,
+    ) -> Result<Self, SerializationError> {
+        let domain =
+            Radix2EvaluationDomain::deserialize_with_mode(&mut reader, compress, validate)?;
+        let nv = usize::deserialize_with_mode(&mut reader, compress, validate)?;
+        let s = usize::deserialize_with_mode(&mut reader, compress, validate)?;
+        let io_str = String::deserialize_with_mode(&mut reader, compress, validate)?;
+        let io = IOPattern::from_string(io_str);
+        Ok(Self { domain, nv, s, io })
     }
 }
 

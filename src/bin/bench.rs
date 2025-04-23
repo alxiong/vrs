@@ -14,6 +14,7 @@ use vrs::{
     gxz::{transparent::GxzVRS, trusted::BkzgGxzVRS},
     matrix::Matrix,
     nnt::{kzg::KzgNntVRS, pedersen::PedersenNntVRS},
+    pcs::lightligero_test::LightLigeroPCS,
     peer_das::PeerDasVRS,
     zoda::ZodaVRS,
     VerifiableReedSolomon,
@@ -54,27 +55,36 @@ fn bench_ndss_base() {
         "n",
         "|M| (MB)",
         "prover (ms)",
-        "per-node overhead. (MB)",
-        "per-node (MB)",
+        "per-node overhead. (KB)",
+        "per-node (KB)",
         "verifier (ms)"
     ];
 
     let mut frida_table = Table::new();
     frida_table.add_row(header.clone());
     let mut conda_pst_table = Table::new();
-    conda_pst_table.add_row(header);
+    conda_pst_table.add_row(header.clone());
+    let mut conda_lightligero_table = Table::new();
+    conda_lightligero_table.add_row(header);
 
-    for num_nodes in [1024, 2048, 4096] {
-        // for num_nodes in [1024] {
+    // for num_nodes in [1024, 2048, 4096] {
+    for num_nodes in [1024] {
         // size means number of fields, not in bytes
-        for block_log_size in [19, 20, 21, 22] {
-            // for block_log_size in [19] {
+        // for block_log_size in [19, 20, 21, 22] {
+        for block_log_size in [19] {
             let (log_k, log_l) = frida_shape_heuristic(block_log_size);
             bench_ndss_helper::<FridaVRS<Fr>>(&mut frida_table, num_nodes, log_k, log_l);
 
             let (log_k, log_l) = conda_shape_heuristic(block_log_size, num_nodes);
-            bench_ndss_helper::<GxzVRS<Fr, MultilinearKzgPCS<Bn254>>>(
-                &mut conda_pst_table,
+            // bench_ndss_helper::<GxzVRS<Fr, MultilinearKzgPCS<Bn254>>>(
+            //     &mut conda_pst_table,
+            //     num_nodes,
+            //     log_k,
+            //     log_l,
+            // );
+
+            bench_ndss_helper::<GxzVRS<Fr, LightLigeroPCS<Bn254>>>(
+                &mut conda_lightligero_table,
                 num_nodes,
                 log_k,
                 log_l,
@@ -86,6 +96,8 @@ fn bench_ndss_base() {
     frida_table.printstd();
     println!("\n🔔 Conda+PST");
     conda_pst_table.printstd();
+    println!("\n🔔 Conda+lightligero");
+    conda_lightligero_table.printstd();
 }
 
 fn bench_ndss_helper<S: VerifiableReedSolomon<Fr>>(
@@ -197,8 +209,8 @@ fn bench_ndss_all() {
         "n",
         "|M| (MB)",
         "prover (ms)",
-        "per-node overhead. (MB)",
-        "per-node (MB)",
+        "per-node overhead. (KB)",
+        "per-node (KB)",
         "verifier (ms)"
     ];
 

@@ -10,6 +10,7 @@ use ark_crypto_primitives::{
 use ark_ff::{Field, PrimeField};
 pub use ark_mt::Config;
 use ark_serialize::*;
+use ark_std::hash::{Hash, Hasher};
 use ark_std::{borrow::Borrow, iter::IntoIterator, marker::PhantomData, rand::Rng};
 
 /// Parameter for a Merkle tree whose leaves are a symbol (arbitrary number of fields)
@@ -121,6 +122,15 @@ impl<F: Field> SymbolMerkleTree<F> {
 pub struct Path<F: Field> {
     inner: ark_mt::Path<SymbolMerkleTreeParams<F>>,
 }
+
+impl<F: Field> Hash for Path<F> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        Hash::hash(&self.inner.leaf_sibling_hash, state);
+        Hash::hash(&self.inner.auth_path, state);
+        Hash::hash(&self.inner.leaf_index, state);
+    }
+}
+impl<F: Field> Eq for Path<F> {}
 
 impl<F: Field> Path<F> {
     /// Verify the merkle path
