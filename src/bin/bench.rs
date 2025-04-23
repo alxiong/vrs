@@ -219,8 +219,8 @@ fn bench_ndss_all() {
     let mut table = Table::new();
     table.add_row(header.clone());
 
-    let block_log_size = 22usize;
-    let num_nodes = 1024;
+    let block_log_size = 21usize;
+    let num_nodes = 2048;
 
     let (log_k, log_l) = frida_shape_heuristic(block_log_size);
     bench_ndss_helper::<FridaVRS<Fr>>(&mut table, num_nodes, log_k, log_l);
@@ -230,7 +230,6 @@ fn bench_ndss_all() {
 
     let (log_k, log_l) = conda_shape_heuristic(block_log_size, num_nodes);
     bench_ndss_helper::<GxzVRS<Fr, MultilinearKzgPCS<Bn254>>>(&mut table, num_nodes, log_k, log_l);
-    bench_ndss_helper::<GxzVRS<Fr, LightLigeroPCS<Bn254>>>(&mut table, num_nodes, log_k, log_l);
 
     let (log_k, log_l) = fast_advz_shape_heuristic(block_log_size, num_nodes);
     bench_ndss_helper::<AdvzVRS<Bn254>>(&mut table, num_nodes, log_k, log_l);
@@ -242,6 +241,9 @@ fn bench_ndss_all() {
     bench_ndss_helper::<KzgNntVRS<Bn254>>(&mut table, num_nodes, log_k, log_l);
     bench_ndss_helper::<PedersenNntVRS<G1Projective>>(&mut table, num_nodes, log_k, log_l);
 
+    println!("Conda + LightLigero: ");
+    let (log_k, log_l) = conda_shape_heuristic(block_log_size, num_nodes);
+    bench_ndss_helper::<GxzVRS<Fr, LightLigeroPCS<Bn254>>>(&mut table, num_nodes, log_k, log_l);
     table.printstd();
 }
 

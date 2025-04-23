@@ -522,6 +522,10 @@ pub(crate) fn prove_internal<F: FftField>(
         "\t Fri::extra query proof: {} ms",
         start.elapsed().as_millis(),
     );
+    println!(
+        "⚠️ ⚠️ Fri::extra query deductible: {} ms",
+        start.elapsed().as_millis()
+    );
 
     (
         FriProof {
@@ -631,7 +635,7 @@ pub(crate) fn batch_prove_internal<F: FftField>(
         })
         .collect();
     println!(
-        "⚠️ ⚠️ Fri::batch mt open : {} ms",
+        "⚠️ ⚠️ Fri::extra BatchColOpen deductible: {} ms",
         start.elapsed().as_millis()
     );
 

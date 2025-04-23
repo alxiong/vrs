@@ -126,6 +126,7 @@ impl<F: FftField> VerifiableReedSolomon<F> for FridaVRS<F> {
                     .into_iter()
                     .zip(extra_batching_proofs.into_iter()),
             )
+            .take(1)
             .map(
                 |(col_data, (selected_query_proof, selected_batching_proof))| VrsShare {
                     data: col_data,

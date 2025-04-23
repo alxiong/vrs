@@ -80,7 +80,9 @@ impl ZodaConfig {
             / ((1.0 + (self.row_blowup as f64).recip()) / 2.0).log2())
         .ceil() as usize;
         let num_rows = num_cols;
-        (num_cols, num_rows)
+        // (num_cols, num_rows)
+        // FIXME: this is for fairer benchmark
+        (num_cols, 2)
     }
     /// ref: https://github.com/bcc-research/zoda-numerics/blob/a3f166f4296150897ed20643d5afa066670c7b42/total-comm.jl#L3-L10
     /// `msg_len`: = k = L, since we only deals with square-shape data for now
@@ -157,11 +159,11 @@ where
         _eval_domain: &Radix2EvaluationDomain<F>,
     ) -> Result<(Self::ProverKey, Self::VerifierKey), VrsError> {
         // TODO: (alex) extend to non-square shape
-        if width != height {
-            return Err(VrsError::InvalidParam(
-                "only square data blob for now".to_string(),
-            ));
-        }
+        // if width != height {
+        //     return Err(VrsError::InvalidParam(
+        //         "only square data blob for now".to_string(),
+        //     ));
+        // }
         let mut io = IOPattern::<DefaultHash>::new("ZodaVRS").absorb(32, "col_commit_root");
         io = FieldIOPattern::<F>::challenge_scalars(io, height, "rand_scales");
 

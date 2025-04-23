@@ -259,10 +259,10 @@ where
             total_start.elapsed().as_millis()
         );
         // since PST open and commit can share lots of compute
-        // println!(
-        //     "⚠️ ⚠️ Conda::PST/Dory deductiable: {} ms",
-        //     dory_deductible * 3 / 10
-        // );
+        println!(
+            "⚠️ ⚠️ Conda::PST/Dory deductiable: {} ms",
+            dory_deductible * 3 / 10
+        );
         println!(
             "⚠️ ⚠️ Conda::LightLigero deductiable: {} ms\n",
             lightligero_deductible
